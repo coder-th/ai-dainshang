@@ -1,0 +1,10 @@
+/* theme.css - override Element Plus primary color to #fb7701 */
+:root {
+  --el-color-primary:         #fb7701;
+  --el-color-primary-light-3: #fca04d;
+  --el-color-primary-light-5: #fdbb80;
+  --el-color-primary-light-7: #fed6b3;
+  --el-color-primary-light-8: #fee4cc;
+  --el-color-primary-light-9: #fff1e6;
+  --el-color-primary-dark-2:  #c95f01;
+}
