@@ -10,8 +10,8 @@ const DEV_URL = "http://localhost:5173"; // Vite dev server
 
 const isDev = !app.isPackaged;
 
-// Remove the default application menu bar
-Menu.setApplicationMenu(null);
+// Auto-hide the menu bar (accessible via Alt key)
+// Menu.setApplicationMenu(null); // Do not remove — keeps window management intact
 
 // ─── IPC: window controls ─────────────────────────────────────────────────────
 ipcMain.on("win-minimize", () => BrowserWindow.getFocusedWindow()?.minimize());
@@ -21,25 +21,9 @@ ipcMain.on("win-maximize", () => {
   if (!win) return;
   win.isMaximized() ? win.unmaximize() : win.maximize();
 });
-ipcMain.on("win-close", async () => {
+ipcMain.on("win-close", () => {
   const win = BrowserWindow.getFocusedWindow();
-  if (!win) return;
-
-  const { response } = await dialog.showMessageBox(win, {
-    type: "question",
-    title: "退出程序",
-    message: "确定要退出程序吗？",
-    buttons: ["退出", "取消"],
-    defaultId: 1,
-    cancelId: 1,
-    noLink: true,
-  });
-
-  if (response === 0) {
-    // User confirmed: kill backend and quit
-    killDjango();
-    app.exit(0);
-  }
+  if (win) win.close(); // 触发 win.on("close") 统一处理确认逻辑
 });
 ipcMain.handle("win-is-maximized", () => BrowserWindow.getFocusedWindow()?.isMaximized() ?? false);
 
@@ -57,7 +41,7 @@ function getBackendExe() {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, "backend", "app.exe");
   }
-  return path.join(__dirname, "..", "dist", "app", "app.exe");
+  return path.join(__dirname, "..", "dist", "app.exe");
 }
 
 function getDataDir() {
@@ -90,6 +74,7 @@ function createMainWindow(loadingWin) {
     minHeight: 600,
     show: false,
     frame: false,
+    autoHideMenuBar: true,
     // icon: path.join(__dirname, "assets", "icon.ico"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -121,6 +106,7 @@ function createMainWindow(loadingWin) {
 
   // Intercept OS-level close (Alt+F4, taskbar right-click close, etc.)
   win.on("close", (e) => {
+    if (isQuitting) return; // app.exit 路径，直接放行
     e.preventDefault(); // block immediate close
     dialog.showMessageBox(win, {
       type: "question",
@@ -132,6 +118,7 @@ function createMainWindow(loadingWin) {
       noLink: true,
     }).then(({ response }) => {
       if (response === 0) {
+        isQuitting = true;
         killDjango();
         app.exit(0);
       }
@@ -192,6 +179,7 @@ function waitFor(url, onReady, retries = 80) {
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 
 let djangoProcess = null;
+let isQuitting = false; // 防止 close 事件与 app.exit 形成重入循环
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -226,7 +214,7 @@ if (!gotLock) {
     }
   });
 
-  app.on("window-all-closed", () => { killDjango(); app.quit(); });
+  app.on("window-all-closed", () => { if (isQuitting) { killDjango(); app.quit(); } });
   // before-quit is kept as safety net for edge cases
   app.on("before-quit", killDjango);
 }

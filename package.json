@@ -13,39 +13,29 @@
   },
   "build": {
     "appId": "com.example.ai-dianshang",
-    "productName": "AI电商",
+    "productName": "AI-Dianshang",
     "copyright": "Copyright © 2024",
     "directories": {
-      "output": "dist-electron"
+      "output": "dist"
     },
     "files": [
       "electron/**/*"
     ],
     "extraResources": [
       {
-        "from": "dist/app/",
-        "to": "backend/"
+        "from": "dist/app.exe",
+        "to": "backend/app.exe"
       }
     ],
     "win": {
       "icon": "electron/assets/icon.ico",
       "target": [
         {
-          "target": "nsis",
+          "target": "portable",
           "arch": ["x64"]
         }
       ]
     },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "AI电商",
-      "installerIcon": "electron/assets/icon.ico",
-      "uninstallerIcon": "electron/assets/icon.ico",
-      "language": "2052"
-    }
+    "portable": {}
   }
 }

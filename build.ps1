@@ -56,7 +56,7 @@ Set-Location $root
 
 pyinstaller build.spec --clean --noconfirm
 Assert-Ok "pyinstaller"
-Write-Host "  [OK] Django bundled -> dist/app/app.exe" -ForegroundColor Green
+Write-Host "  [OK] Django bundled -> dist/backend/app.exe" -ForegroundColor Green
 
 # --- Step 4: Install Electron dependencies ---
 Step 4 5 "Installing Electron dependencies..."
@@ -75,5 +75,5 @@ Assert-Ok "electron-builder"
 
 Write-Host "`n================================================" -ForegroundColor Green
 Write-Host "  Build complete!" -ForegroundColor Green
-Write-Host "  Installer: dist-electron\AI-1.0.0-Setup.exe" -ForegroundColor Green
+Write-Host "  Portable exe: dist\AI-Dianshang.exe" -ForegroundColor Green
 Write-Host "================================================`n" -ForegroundColor Green
