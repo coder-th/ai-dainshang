@@ -174,8 +174,9 @@ class GenerateView(APIView):
             return Response({"error": "缺少 API 密钥"}, status=400)
         if not prompt:
             return Response({"error": "缺少创意描述"}, status=400)
-        if not base_images:
-            return Response({"error": "请至少上传一张基准图片"}, status=400)
+
+        # 没有基准图时切换为文生图模式（不传 image 参数给灵芽AI）
+        is_text_to_image = len(base_images) == 0
 
         provider = get_image_provider(model)
 
@@ -188,8 +189,8 @@ class GenerateView(APIView):
                     image_size=image_size,
                     search=search,
                     aspect_ratio=aspect_ratio,
-                    base_images=[base_img],
-                    ref_images=ref_images,
+                    base_images=[] if is_text_to_image else [base_img],
+                    ref_images=[] if is_text_to_image else ref_images,
                 )
                 url = _call_provider(api_key, payload, provider)
                 return {"index": idx, "url": url, "error": None}
@@ -206,7 +207,8 @@ class GenerateView(APIView):
             except (KeyError, IndexError):
                 return {"index": idx, "url": None, "error": "API 响应格式异常"}
 
-        tasks = list(enumerate(base_images))
+        # 文生图模式：创建单个虚拟任务（index=0，无基准图）
+        tasks = [(0, None)] if is_text_to_image else list(enumerate(base_images))
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(tasks)) as pool:
             results = list(pool.map(run_task, tasks))
 

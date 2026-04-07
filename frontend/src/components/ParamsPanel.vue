@@ -82,6 +82,17 @@ const emit = defineEmits(['update:modelValue'])
 
 const innerParams = reactive({ ...props.modelValue })
 
+// 初始化时确保当前比例/分辨率在该模型支持列表内，否则重置为默认值
+;(function _initFix() {
+  const model = getImageModelById(props.modelId)
+  if (!model.supportedRatios.includes(innerParams.aspectRatio)) {
+    innerParams.aspectRatio = model.defaultRatio
+  }
+  if (!model.supportedSizes.includes(innerParams.resolution)) {
+    innerParams.resolution = model.defaultSize
+  }
+})()
+
 // 双向同步
 watch(innerParams, (val) => emit('update:modelValue', { ...val }))
 watch(() => props.modelValue, (val) => Object.assign(innerParams, val), { deep: true })

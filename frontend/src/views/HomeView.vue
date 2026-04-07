@@ -128,7 +128,7 @@
         </el-card>
 
         <!-- 参考图片 -->
-        <el-card class="section-card ref-images-card" shadow="never">
+        <el-card class="section-card ref-images-card" shadow="never" :class="{ 'is-disabled': baseImages.length === 0 }">
           <div class="ref-header">
             <div class="icon-badge icon-badge--green">
               <el-icon size="16" color="#67c23a"><Picture /></el-icon>
@@ -138,7 +138,15 @@
               <p class="ref-count">{{ referenceImages.length }}/8</p>
             </div>
           </div>
-          <div class="images-row">
+          <el-alert
+            v-if="baseImages.length === 0"
+            type="warning"
+            :closable="false"
+            class="ref-disabled-tip"
+          >
+            请先上传基准图片后再添加参考图片
+          </el-alert>
+          <div v-else class="images-row">
             <div
               v-for="(img, idx) in referenceImages"
               :key="img.uid"
@@ -165,7 +173,11 @@
 
       <!-- 右栏：参数 + 生成 -->
       <div class="right-col">
-        <ParamsPanel v-model="params" :model-id="currentModelId" />
+        <ParamsPanel
+          :model-value="params"
+          :model-id="currentModelId"
+          @update:model-value="Object.assign(params, $event)"
+        />
 
         <!-- 开始创作按钮 -->
         <el-button
@@ -173,7 +185,7 @@
           type="primary"
           size="large"
           :loading="isGenerating"
-          :disabled="!prompt.trim() || baseImages.length === 0 || isGenerating"
+          :disabled="!prompt.trim() || isGenerating"
           @click="handleGenerate"
         >
           <el-icon v-if="!isGenerating" size="22"><StarFilled /></el-icon>
@@ -446,6 +458,11 @@ function translatePrompt() {
 }
 .ref-title { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
 .ref-count { font-size: 12px; color: var(--el-text-color-secondary); margin: 0; }
+
+.ref-disabled-tip {
+  border-radius: 8px;
+  font-size: 12px;
+}
 
 .base-img-tip {
   margin-bottom: 10px;

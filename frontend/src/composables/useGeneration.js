@@ -107,14 +107,11 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, pro
   }
 
   async function handleGenerate() {
+    console.log('[generate] params snapshot:', JSON.stringify(params))
     const storedKey = localStorage.getItem('ai_api_key') || ''
     if (!storedKey) {
       ElMessage.warning('请先配置 API 密钥')
       showSettings.value = true
-      return
-    }
-    if (baseImages.value.length === 0) {
-      ElMessage.warning('请至少上传一张基准图片')
       return
     }
     if (!prompt.value?.trim()) {
@@ -129,6 +126,62 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, pro
       refB64s = await Promise.all(referenceImages.value.map(img => _fileToBase64(img.file)))
     } catch {
       ElMessage.error('参考图片处理失败')
+      isGenerating.value = false
+      return
+    }
+
+    // 没有基准图时切换为文生图模式：创建单个虚拟任务，不传 baseImage
+    const isTextToImage = baseImages.value.length === 0
+
+    if (isTextToImage) {
+      generationTasks.value = [{
+        id: `${Date.now()}-0`,
+        index: 0,
+        baseImage: null,
+        status: 'pending',
+        progress: 0,
+        resultUrl: null,
+        doneAt: null,
+        fileSize: null,
+        selected: true,
+        error: null,
+        _intervalId: null,
+        _blob: null,
+      }]
+      const task = generationTasks.value[0]
+      task.status = 'loading'
+      _startFakeProgress(task)
+      const storedKeyInner = localStorage.getItem('ai_api_key') || ''
+      const t0 = Date.now()
+      try {
+        const resp = await generateApi.generate({
+          api_key: storedKeyInner,
+          model: currentModelId.value,
+          prompt: prompt.value,
+          aspect_ratio: params.aspectRatio,
+          image_size: params.resolution,
+          search: params.webAccess === 'true',
+          base_images: [],
+          ref_images: refB64s,
+        })
+        const result = resp.data.results?.[0]
+        if (result?.error) throw new Error(result.error)
+        _stopFakeProgress(task, true)
+        task.resultUrl = result.url
+        task.doneAt = `${((Date.now() - t0) / 1000).toFixed(1)}s`
+        try {
+          const proxyResp = await fetch(_buildProxyUrl(result.url))
+          const cl = proxyResp.headers.get('content-length')
+          task._blob = await proxyResp.blob()
+          task.fileSize = _formatBytes(cl ? parseInt(cl) : task._blob.size)
+        } catch { task.fileSize = null }
+        task.status = 'done'
+        ElMessage.success('图片生成完成')
+      } catch (e) {
+        _stopFakeProgress(task, false)
+        task.error = e.response?.data?.error || e.message || '生成失败'
+        task.status = 'error'
+      }
       isGenerating.value = false
       return
     }

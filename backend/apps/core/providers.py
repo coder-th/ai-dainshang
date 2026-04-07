@@ -82,11 +82,13 @@ class LingyaImageProvider(BaseImageProvider):
             "prompt": prompt,
             "image_size": image_size,
             "search": search,
-            # 灵芽规范：image 列表 = [基准图, ...参考图]
-            "image": [*base_images, *ref_images],
         }
         if aspect_ratio and aspect_ratio != "auto":
             payload["aspect_ratio"] = aspect_ratio
+        # 灵芽规范：image 列表 = [基准图, ...参考图]，无图片时不传（文生图模式）
+        combined = [*base_images, *ref_images]
+        if combined:
+            payload["image"] = combined
         return payload
 
     def parse_response(self, data: dict) -> str:

@@ -48,7 +48,15 @@
             @click.stop
           />
           <span v-else class="result-card-num">#{{ task.index + 1 }}</span>
-          <img class="result-base-thumb" :src="task.baseImage.url" :alt="`基准${task.index + 1}`" />
+          <img
+            v-if="task.baseImage"
+            class="result-base-thumb"
+            :src="task.baseImage.url"
+            :alt="`基准${task.index + 1}`"
+          />
+          <div v-else class="result-base-thumb result-base-placeholder">
+            <el-icon size="14" color="var(--el-text-color-placeholder)"><EditPen /></el-icon>
+          </div>
           <span class="result-status-tag" :class="`is-${task.status}`">
             {{ STATUS_LABELS[task.status] }}
           </span>
@@ -108,7 +116,7 @@
 <script setup>
 import {
   Picture, FolderChecked, ZoomIn, Timer, Document,
-  RefreshLeft, Download, WarningFilled,
+  RefreshLeft, Download, WarningFilled, EditPen,
 } from '@element-plus/icons-vue'
 
 const STATUS_LABELS = { pending: '等待中', loading: '生成中', done: '已完成', error: '失败' }
@@ -200,6 +208,11 @@ defineEmits(['retry', 'download', 'batch-save', 'preview', 'toggle-all', 'toggle
   width: 28px; height: 28px;
   object-fit: cover; border-radius: 4px;
   border: 1px solid var(--el-border-color-lighter); flex-shrink: 0;
+}
+
+.result-base-placeholder {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--el-fill-color-light);
 }
 
 .result-status-tag {
