@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     :model-value="modelValue"
-    width="480px"
+    width="500px"
     :show-close="true"
     class="settings-dialog"
     @update:model-value="$emit('update:modelValue', $event)"
@@ -13,30 +13,56 @@
         </div>
         <div>
           <h2 class="settings-title">快速设置</h2>
-          <p class="settings-subtitle">配置您的API密钥，开始AI创作之旅</p>
+          <p class="settings-subtitle">为每个AI供应商单独配置API密钥</p>
         </div>
       </div>
     </template>
 
     <div class="settings-body">
-      <div class="api-key-item">
-        <label class="api-key-label">API 密钥</label>
-        <el-input
-          v-model="localKey"
-          :type="showKey ? 'text' : 'password'"
-          placeholder="请输入您的 API Key"
-          size="large"
-          clearable
+      <el-tabs v-model="activeTab" class="provider-tabs">
+        <el-tab-pane
+          v-for="provider in PROVIDERS"
+          :key="provider.id"
+          :label="provider.name"
+          :name="provider.id"
         >
-          <template #prefix><el-icon><Key /></el-icon></template>
-          <template #suffix>
-            <el-icon style="cursor:pointer" @click="showKey = !showKey">
-              <View v-if="!showKey" /><Hide v-else />
-            </el-icon>
-          </template>
-        </el-input>
-        <p class="api-key-tip">API 密钥将安全存储在本地，不会上传至任何服务器</p>
-      </div>
+          <div class="api-key-item">
+            <div class="provider-status">
+              <el-tag
+                v-if="keys[provider.id]"
+                type="success"
+                size="small"
+                effect="light"
+              >
+                已配置
+              </el-tag>
+              <el-tag
+                v-else
+                type="warning"
+                size="small"
+                effect="light"
+              >
+                未配置
+              </el-tag>
+            </div>
+            <el-input
+              v-model="keys[provider.id]"
+              :type="showKey[provider.id] ? 'text' : 'password'"
+              :placeholder="provider.placeholder"
+              size="large"
+              clearable
+            >
+              <template #prefix><el-icon><Key /></el-icon></template>
+              <template #suffix>
+                <el-icon style="cursor:pointer" @click="showKey[provider.id] = !showKey[provider.id]">
+                  <View v-if="!showKey[provider.id]" /><Hide v-else />
+                </el-icon>
+              </template>
+            </el-input>
+            <p class="api-key-tip">API 密钥将安全存储在本地，不会上传至任何服务器</p>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </div>
 
     <template #footer>
@@ -49,30 +75,49 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Setting, Key, View, Hide, Check } from '@element-plus/icons-vue'
+import { PROVIDERS, getProviderById, saveApiKey, getApiKey } from '@/config/providers.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, required: true },
+  // 打开时自动定位到的供应商 Tab，默认第一个
+  activeProvider: { type: String, default: PROVIDERS[0].id },
 })
 const emit = defineEmits(['update:modelValue'])
 
-const localKey = ref(localStorage.getItem('ai_api_key') || '')
-const showKey = ref(false)
+const activeTab = ref(props.activeProvider)
 
-// 每次打开对话框时同步最新值
+// 每个供应商各自的 key 和显示状态
+const keys = reactive(Object.fromEntries(PROVIDERS.map(p => [p.id, ''])))
+const showKey = reactive(Object.fromEntries(PROVIDERS.map(p => [p.id, false])))
+
+// 打开对话框时同步最新值并定位到指定 Tab
 watch(() => props.modelValue, (val) => {
-  if (val) localKey.value = localStorage.getItem('ai_api_key') || ''
+  if (val) {
+    activeTab.value = props.activeProvider
+    PROVIDERS.forEach(p => {
+      keys[p.id] = getApiKey(p.id)
+      showKey[p.id] = false
+    })
+  }
+})
+
+// activeProvider 变化时同步 tab（如父组件在对话框已打开时切换）
+watch(() => props.activeProvider, (val) => {
+  activeTab.value = val
 })
 
 function save() {
-  if (!localKey.value.trim()) {
-    ElMessage.warning('请输入 API 密钥')
+  const provider = getProviderById(activeTab.value)
+  const key = keys[activeTab.value]?.trim()
+  if (!key) {
+    ElMessage.warning(`请输入 ${provider.name} 的 API 密钥`)
     return
   }
-  localStorage.setItem('ai_api_key', localKey.value.trim())
-  ElMessage.success('API 密钥已保存')
+  saveApiKey(activeTab.value, key)
+  ElMessage.success(`${provider.name} 的 API 密钥已保存`)
   emit('update:modelValue', false)
 }
 </script>
@@ -81,9 +126,16 @@ function save() {
 .settings-dialog-header { display: flex; align-items: center; gap: 14px; }
 .settings-title { font-size: 17px; font-weight: 700; margin: 0 0 3px; }
 .settings-subtitle { font-size: 13px; color: var(--el-text-color-secondary); margin: 0; }
-.settings-body { padding: 4px 0; }
-.api-key-item { display: flex; flex-direction: column; gap: 8px; }
-.api-key-label { font-size: 14px; font-weight: 600; color: var(--el-text-color-primary); }
+
+.settings-body { padding: 4px 0 0; }
+
+.provider-tabs :deep(.el-tabs__nav-wrap::after) { height: 1px; }
+.provider-tabs :deep(.el-tabs__item) { font-weight: 600; }
+
+.api-key-item { display: flex; flex-direction: column; gap: 8px; padding-top: 16px; }
+
+.provider-status { display: flex; align-items: center; }
+
 .api-key-tip {
   font-size: 12px; color: var(--el-text-color-secondary); margin: 0;
   display: flex; align-items: center; gap: 4px;

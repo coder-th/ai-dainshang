@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { generateApi } from '@/api/index.js'
+import { getApiKey } from '@/config/providers.js'
 
 function _buildProxyUrl(remoteUrl) {
   const base = import.meta.env.DEV ? '/api' : `${window.location.origin}/api`
@@ -14,13 +15,18 @@ function _formatBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
 
-function _fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result)
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
+/** 从 blob URL 提取后缀，用于批量保存时命名 */
+function _extFromUrl(url) {
+  const clean = url?.split('?')[0] ?? ''
+  const m = clean.match(/\.([a-zA-Z0-9]+)$/)
+  return m ? `.${m[1].toLowerCase()}` : '.jpg'
+}
+
+/** 生成批量保存子文件夹名称：MM-DD-HH-mm */
+function _folderName() {
+  const d = new Date()
+  const pad = n => String(n).padStart(2, '0')
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}-${pad(d.getMinutes())}`
 }
 
 function _startFakeProgress(task) {
@@ -42,9 +48,9 @@ function _stopFakeProgress(task, success) {
 /**
  * 图像生成任务管理 Composable
  *
- * @param {{ baseImages, referenceImages, currentModelId, params, showSettings }} deps
+ * @param {{ baseImages, referenceImages, currentModelId, currentProviderId, prompt, params, showSettings, settingsActiveProvider }} deps
  */
-export function useGeneration({ baseImages, referenceImages, currentModelId, prompt, params, showSettings }) {
+export function useGeneration({ baseImages, referenceImages, currentModelId, currentProviderId, prompt, params, showSettings, settingsActiveProvider }) {
   const generationTasks = ref([])
   const isGenerating = ref(false)
   const isBatchSaving = ref(false)
@@ -68,16 +74,24 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, pro
     generationTasks.value.filter(t => t.status === 'done' && t.selected).length
   )
 
+  function _openSettings() {
+    if (settingsActiveProvider) {
+      settingsActiveProvider.value = currentProviderId.value
+    }
+    showSettings.value = true
+  }
+
   async function _executeTask(task, baseB64, refB64s) {
     task.status = 'loading'
     task.doneAt = null
     task.fileSize = null
     _startFakeProgress(task)
-    const storedKey = localStorage.getItem('ai_api_key') || ''
+    const storedKey = getApiKey(currentProviderId.value)
     const t0 = Date.now()
     try {
       const resp = await generateApi.generate({
         api_key: storedKey,
+        provider: currentProviderId.value,
         model: currentModelId.value,
         prompt: prompt.value,
         aspect_ratio: params.aspectRatio,
@@ -91,7 +105,6 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, pro
       _stopFakeProgress(task, true)
       task.resultUrl = result.url
       task.doneAt = `${((Date.now() - t0) / 1000).toFixed(1)}s`
-      // 代理拉取图片，同时获取大小并缓存 blob
       try {
         const proxyResp = await fetch(_buildProxyUrl(result.url))
         const cl = proxyResp.headers.get('content-length')
@@ -107,11 +120,10 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, pro
   }
 
   async function handleGenerate() {
-    console.log('[generate] params snapshot:', JSON.stringify(params))
-    const storedKey = localStorage.getItem('ai_api_key') || ''
+    const storedKey = getApiKey(currentProviderId.value)
     if (!storedKey) {
       ElMessage.warning('请先配置 API 密钥')
-      showSettings.value = true
+      _openSettings()
       return
     }
     if (!prompt.value?.trim()) {
@@ -121,16 +133,9 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, pro
 
     isGenerating.value = true
 
-    let refB64s = []
-    try {
-      refB64s = await Promise.all(referenceImages.value.map(img => _fileToBase64(img.file)))
-    } catch {
-      ElMessage.error('参考图片处理失败')
-      isGenerating.value = false
-      return
-    }
+    // 直接读取上传时已缓存的 b64，不再重新读取 file 对象
+    const refB64s = referenceImages.value.map(img => img.b64)
 
-    // 没有基准图时切换为文生图模式：创建单个虚拟任务，不传 baseImage
     const isTextToImage = baseImages.value.length === 0
 
     if (isTextToImage) {
@@ -151,11 +156,11 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, pro
       const task = generationTasks.value[0]
       task.status = 'loading'
       _startFakeProgress(task)
-      const storedKeyInner = localStorage.getItem('ai_api_key') || ''
       const t0 = Date.now()
       try {
         const resp = await generateApi.generate({
-          api_key: storedKeyInner,
+          api_key: storedKey,
+          provider: currentProviderId.value,
           model: currentModelId.value,
           prompt: prompt.value,
           aspect_ratio: params.aspectRatio,
@@ -203,13 +208,8 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, pro
 
     await Promise.allSettled(
       generationTasks.value.map(async (task) => {
-        try {
-          const baseB64 = await _fileToBase64(task.baseImage.file)
-          await _executeTask(task, baseB64, refB64s)
-        } catch {
-          task.status = 'error'
-          task.error = '图片处理失败'
-        }
+        const baseB64 = task.baseImage.b64
+        await _executeTask(task, baseB64, refB64s)
       })
     )
 
@@ -221,18 +221,13 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, pro
   }
 
   async function retryTask(task) {
-    const storedKey = localStorage.getItem('ai_api_key') || ''
-    if (!storedKey) { showSettings.value = true; return }
+    const storedKey = getApiKey(currentProviderId.value)
+    if (!storedKey) { _openSettings(); return }
     task.error = null
     task.progress = 0
-    try {
-      const refB64s = await Promise.all(referenceImages.value.map(img => _fileToBase64(img.file)))
-      const baseB64 = await _fileToBase64(task.baseImage.file)
-      await _executeTask(task, baseB64, refB64s)
-    } catch {
-      task.status = 'error'
-      task.error = '重试失败'
-    }
+    const refB64s = referenceImages.value.map(img => img.b64)
+    const baseB64 = task.baseImage?.b64 ?? null
+    await _executeTask(task, baseB64, refB64s)
   }
 
   function openResultPreview(clickedTask) {
@@ -259,10 +254,53 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, pro
     }
   }
 
+  /**
+   * 批量保存：使用 File System Access API 写入用户指定目录下的子文件夹。
+   * 子文件夹命名为 MM-DD-HH-mm，每张图命名为 result-1.jpg / result-2.jpg …
+   * 若浏览器不支持 showDirectoryPicker，降级为逐个下载。
+   */
   async function batchSaveResults() {
     const selected = generationTasks.value.filter(t => t.status === 'done' && t.selected)
     if (!selected.length) return
+
     isBatchSaving.value = true
+
+    // 尝试 File System Access API
+    if (typeof window.showDirectoryPicker === 'function') {
+      try {
+        const rootHandle = await window.showDirectoryPicker({ mode: 'readwrite' })
+        const subFolderName = _folderName()
+        const subHandle = await rootHandle.getDirectoryHandle(subFolderName, { create: true })
+
+        let successCount = 0
+        for (const task of selected) {
+          try {
+            const blob = task._blob ?? await (await fetch(_buildProxyUrl(task.resultUrl))).blob()
+            const ext = _extFromUrl(task.resultUrl)
+            const fileName = `result-${task.index + 1}${ext}`
+            const fileHandle = await subHandle.getFileHandle(fileName, { create: true })
+            const writable = await fileHandle.createWritable()
+            await writable.write(blob)
+            await writable.close()
+            successCount++
+          } catch {
+            ElMessage.warning(`第 ${task.index + 1} 张保存失败`)
+          }
+        }
+        isBatchSaving.value = false
+        if (successCount > 0) ElMessage.success(`已保存 ${successCount} 张到文件夹 ${subFolderName}`)
+        return
+      } catch (e) {
+        // 用户取消选择文件夹
+        if (e?.name === 'AbortError') {
+          isBatchSaving.value = false
+          return
+        }
+        // 其他错误降级
+      }
+    }
+
+    // 降级：逐个触发浏览器下载
     let successCount = 0
     for (const task of selected) {
       try {

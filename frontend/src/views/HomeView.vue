@@ -40,7 +40,10 @@
                 <el-icon size="22"><Lightning /></el-icon>
               </div>
               <div class="model-text">
-                <div class="model-name">{{ currentModel.name }}</div>
+                <div class="model-name">
+                  {{ currentModel.name }}
+                  <el-tag size="small" style="margin-left:6px;vertical-align:middle">{{ currentProviderName }}</el-tag>
+                </div>
                 <div class="model-desc">{{ currentModel.desc }}</div>
               </div>
             </div>
@@ -202,7 +205,7 @@
     />
 
     <!-- 快速设置对话框 -->
-    <QuickSettingsDialog v-model="showSettings" />
+    <QuickSettingsDialog v-model="showSettings" :active-provider="settingsActiveProvider" />
 
     <!-- 上传图片预览器 -->
     <el-image-viewer
@@ -244,7 +247,8 @@ import {
   Setting, MagicStick, Lightning, EditPen, Promotion, Close,
   Picture, StarFilled, ArrowDown, Brush, Plus, Aim,
 } from '@element-plus/icons-vue'
-import { getImageModelById } from '@/config/models.js'
+import { getImageModelById, getProviderIdByModelId } from '@/config/models.js'
+import { getProviderById } from '@/config/providers.js'
 import { useImageUpload } from '@/composables/useImageUpload.js'
 import { useGeneration } from '@/composables/useGeneration.js'
 import ParamsPanel from '@/components/ParamsPanel.vue'
@@ -255,6 +259,10 @@ import QuickSettingsDialog from '@/components/QuickSettingsDialog.vue'
 // ── 模型 ──────────────────────────────────────────
 const currentModelId = ref('nano-banana-2')
 const currentModel = computed(() => getImageModelById(currentModelId.value))
+
+// ── 供应商（由当前模型自动推导） ──────────────────
+const currentProviderId = computed(() => getProviderIdByModelId(currentModelId.value))
+const currentProviderName = computed(() => getProviderById(currentProviderId.value).name)
 
 function onModelSelect(id) {
   currentModelId.value = id
@@ -273,6 +281,7 @@ const params = reactive({
 // ── 对话框状态 ─────────────────────────────────────
 const showModelDialog = ref(false)
 const showSettings = ref(false)
+const settingsActiveProvider = ref(currentProviderId.value)
 
 // ── 图片上传 ───────────────────────────────────────
 const {
@@ -303,7 +312,7 @@ const {
   openResultPreview,
   downloadResult,
   batchSaveResults,
-} = useGeneration({ baseImages, referenceImages, currentModelId, prompt, params, showSettings })
+} = useGeneration({ baseImages, referenceImages, currentModelId, currentProviderId, prompt, params, showSettings, settingsActiveProvider })
 
 // ── 工具方法 ───────────────────────────────────────
 function optimizePrompt() {

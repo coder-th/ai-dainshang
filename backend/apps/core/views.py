@@ -32,88 +32,88 @@ def _write_api_log(record: dict) -> None:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def _truncate_b64(value, max_len: int = 64) -> str:
-    if isinstance(value, str) and len(value) > max_len:
-        return value[:max_len] + f"...[{len(value)} chars]"
-    return value
-
-
-def _sanitize_payload(payload: dict) -> dict:
-    result = dict(payload)
-    if "image" in result:
-        result["image"] = [_truncate_b64(img) for img in result["image"]]
-    return result
+def _clip(text, n: int = 1000) -> str:
+    """截断过长字符串，防止日志膨胀"""
+    s = text if isinstance(text, str) else str(text)
+    return s if len(s) <= n else s[:n] + f"...[{len(s)} chars]"
 
 
 # ─── 通用 HTTP 执行层 ─────────────────────────────────────────────────────────
 
-def _call_provider(api_key: str, payload: dict, provider) -> str:
+def _call_provider(api_key: str, payload: dict, provider, model: str = "") -> str:
     """
     通用 HTTP 执行层：负责日志、超时、错误处理。
     URL 和响应解析由 provider 提供，实现 Provider 间解耦。
     """
-    url = provider.api_url
-    model = payload.get("model", "")
-    logger.info("→ POST %s  model=%s  image_size=%s", url, model, payload.get("image_size"))
-    t0 = time.monotonic()
+    request_kwargs = provider.get_request_kwargs(api_key, payload, model)
+    url = request_kwargs["url"]
 
-    log_record = {
+    # 最小化初始字段，确保 finally 块中 log_record 始终有效
+    log_record: dict = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "provider": type(provider).__name__,
         "url": url,
-        "request": _sanitize_payload(payload),
+        "model": model,
+        "request": None,
         "response": None,
         "error": None,
         "elapsed_s": None,
     }
 
-    try:
-        resp = req.post(
-            url,
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            timeout=180,
-        )
-        elapsed = time.monotonic() - t0
-        logger.info("← %s %s  elapsed=%.2fs", resp.status_code, url, elapsed)
-        resp.raise_for_status()
-        data = resp.json()
+    # 记录请求摘要到 outbound.log（含认证方式，便于调试）
+    has_bearer = bool(request_kwargs.get("headers", {}).get("Authorization"))
+    has_key    = "key" in request_kwargs.get("params", {})
+    logger.info(
+        "→ POST %s  provider=%s  model=%s  auth=[bearer=%s key_param=%s]",
+        url, type(provider).__name__, model, has_bearer, has_key,
+    )
+    t0 = time.monotonic()
 
+    try:
+        # 序列化请求体（独立 try，失败不影响整体日志写入）
+        try:
+            log_record["request"] = _clip(json.dumps(payload, ensure_ascii=False))
+        except Exception as e:
+            log_record["request"] = f"[serialize error: {e}]"
+
+        post_kwargs = dict(request_kwargs)
+        post_url = post_kwargs.pop("url")
+        resp = req.post(post_url, timeout=180, **post_kwargs)
+        elapsed = time.monotonic() - t0
         log_record["elapsed_s"] = round(elapsed, 3)
+        logger.info("← %s  elapsed=%.2fs  url=%s", resp.status_code, elapsed, url)
+
         log_record["response"] = {
             "status_code": resp.status_code,
-            "keys": list(data.keys()),
-            "data": _truncate_b64(str(data.get("data", [])), max_len=12800),
+            "body": _clip(resp.text, 2000),
         }
-        _write_api_log(log_record)
 
-        return provider.parse_response(data)
+        resp.raise_for_status()
+        data = resp.json()
+        result_url = provider.parse_response(data)
+        return result_url
 
     except req.Timeout:
         elapsed = time.monotonic() - t0
-        logger.warning("✗ TIMEOUT %s  elapsed=%.2fs", url, elapsed)
         log_record["elapsed_s"] = round(elapsed, 3)
         log_record["error"] = "Timeout"
-        _write_api_log(log_record)
+        logger.warning("✗ TIMEOUT %s  elapsed=%.2fs", url, elapsed)
         raise
     except req.HTTPError as e:
-        elapsed = time.monotonic() - t0
         status_code = e.response.status_code if e.response is not None else None
-        logger.error("✗ HTTP ERROR %s  status=%s  elapsed=%.2fs  detail=%s", url, status_code or "?", elapsed, e)
-        log_record["elapsed_s"] = round(elapsed, 3)
-        log_record["error"] = {"type": "HTTPError", "status_code": status_code, "detail": str(e)}
-        _write_api_log(log_record)
+        err_detail = e.response.text[:500] if e.response is not None else str(e)
+        log_record["error"] = {"status_code": status_code, "detail": err_detail}
+        logger.error("✗ HTTP ERROR %s  status=%s  detail=%s", url, status_code, err_detail)
         raise
-    except req.RequestException as e:
-        elapsed = time.monotonic() - t0
-        logger.error("✗ REQUEST ERROR %s  elapsed=%.2fs  detail=%s", url, elapsed, e)
-        log_record["elapsed_s"] = round(elapsed, 3)
+    except Exception as e:
         log_record["error"] = {"type": type(e).__name__, "detail": str(e)}
-        _write_api_log(log_record)
+        logger.error("✗ ERROR %s  %s: %s", url, type(e).__name__, e)
         raise
+    finally:
+        try:
+            _write_api_log(log_record)
+        except Exception as e:
+            logger.error("✗ 日志写入失败: %s", e)
 
 
 # ─── Item CRUD ────────────────────────────────────────────────────────────────
@@ -138,11 +138,12 @@ class GenerateView(APIView):
     请求体：
     {
         "api_key":      "sk-...",
+        "provider":     "lingy",          // 可选，供应商 id（lingy / yunwu）
         "model":        "nano-banana-2",
         "prompt":       "...",
-        "aspect_ratio": "3:4",    // 可选，"auto" 时省略
+        "aspect_ratio": "3:4",            // 可选，"auto" 时省略
         "image_size":   "1K",
-        "search":       true,     // 可选，默认 false
+        "search":       true,             // 可选，默认 false
         "base_images":  ["data:image/jpeg;base64,..."],
         "ref_images":   ["data:image/jpeg;base64,..."]
     }
@@ -162,6 +163,7 @@ class GenerateView(APIView):
     def post(self, request):
         d = request.data
         api_key = (d.get("api_key") or "").strip()
+        provider_id = (d.get("provider") or "").strip() or None
         model = d.get("model") or "nano-banana-2"
         prompt = (d.get("prompt") or "").strip()
         aspect_ratio = d.get("aspect_ratio") or "auto"
@@ -175,10 +177,11 @@ class GenerateView(APIView):
         if not prompt:
             return Response({"error": "缺少创意描述"}, status=400)
 
-        # 没有基准图时切换为文生图模式（不传 image 参数给灵芽AI）
+        # 没有基准图时切换为文生图模式
         is_text_to_image = len(base_images) == 0
 
-        provider = get_image_provider(model)
+        # provider_id 优先，未传则按 model_id 匹配
+        provider = get_image_provider(model, provider_id=provider_id)
 
         def run_task(idx_img):
             idx, base_img = idx_img
@@ -192,7 +195,7 @@ class GenerateView(APIView):
                     base_images=[] if is_text_to_image else [base_img],
                     ref_images=[] if is_text_to_image else ref_images,
                 )
-                url = _call_provider(api_key, payload, provider)
+                url = _call_provider(api_key, payload, provider, model=model)
                 return {"index": idx, "url": url, "error": None}
             except req.Timeout:
                 return {"index": idx, "url": None, "error": "请求超时，请重试"}
@@ -204,8 +207,8 @@ class GenerateView(APIView):
                 return {"index": idx, "url": None, "error": f"API 错误: {msg}"}
             except req.RequestException as e:
                 return {"index": idx, "url": None, "error": f"网络错误: {str(e)}"}
-            except (KeyError, IndexError):
-                return {"index": idx, "url": None, "error": "API 响应格式异常"}
+            except (KeyError, IndexError) as e:
+                return {"index": idx, "url": None, "error": f"API 响应格式异常: {str(e)}"}
 
         # 文生图模式：创建单个虚拟任务（index=0，无基准图）
         tasks = [(0, None)] if is_text_to_image else list(enumerate(base_images))
@@ -254,6 +257,7 @@ class ProxyImageView(APIView):
     """
     GET /api/proxy-image/?url=<远程图片URL>
     由服务端代下载远程图片并流式返回，解决前端直接 fetch 的 CORS 限制。
+    支持 data URI（云雾AI 直接返回 base64 时）转发给前端。
     """
 
     authentication_classes = []
@@ -263,6 +267,21 @@ class ProxyImageView(APIView):
         image_url = request.query_params.get("url", "").strip()
         if not image_url:
             return HttpResponseBadRequest("缺少 url 参数")
+
+        # 云雾AI 返回 data URI（base64），直接解码并返回
+        if image_url.startswith("data:"):
+            import base64
+            try:
+                header, b64_data = image_url.split(",", 1)
+                mime = header.split(":")[1].split(";")[0]
+                raw = base64.b64decode(b64_data)
+                from django.http import HttpResponse
+                response = HttpResponse(raw, content_type=mime)
+                response["Content-Length"] = str(len(raw))
+                response["Content-Disposition"] = 'attachment; filename="image.jpg"'
+                return response
+            except Exception as e:
+                return HttpResponseBadRequest(f"data URI 解析失败: {e}")
 
         try:
             remote = req.get(image_url, stream=True, timeout=60)

@@ -30,14 +30,21 @@ export function useImageUpload() {
     return true
   }
 
-  function onFileChange(e, type) {
+  async function onFileChange(e, type) {
     const list = _getList(type)
     const limit = LIMITS[type]
     const files = Array.from(e.target.files || [])
     for (const file of files) {
       if (!_validateFile(file, list, limit)) break
       const url = URL.createObjectURL(file)
-      list.value.push({ uid: `${Date.now()}-${Math.random()}`, name: file.name, url, file })
+      // 上传时立即缓存 base64，避免后续多次调用 FileReader 或 file 对象失效
+      const b64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+      list.value.push({ uid: `${Date.now()}-${Math.random()}`, name: file.name, url, file, b64 })
     }
     e.target.value = ''
   }
