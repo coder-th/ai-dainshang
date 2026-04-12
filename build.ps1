@@ -1,9 +1,9 @@
 # Full build script: Vue + Django(PyInstaller) + Electron installer
-# Usage: .\build.ps1 [-KeepBackendExe]
-#   -KeepBackendExe  Keep dist/app.exe after build (used by publish.ps1)
+# Usage: .\build.ps1 [-Publish]
+#   -Publish  Upload release to GitHub after build (used by publish.ps1)
 
 param(
-    [switch]$KeepBackendExe
+    [switch]$Publish
 )
 
 $ErrorActionPreference = "Stop"
@@ -83,7 +83,11 @@ Write-Host "  [OK] Electron dependencies ready." -ForegroundColor Green
 
 # --- Step 5: Build Electron installer ---
 Step 5 5 "Building Electron installer (Windows NSIS)..."
-npm run build:win
+if ($Publish) {
+    npx electron-builder --win --x64 --publish always
+} else {
+    npm run build:win
+}
 Assert-Ok "electron-builder"
 
 # --- Post-step: Remove intermediate artifacts ---
@@ -93,7 +97,7 @@ if (Test-Path $unpackedPath) {
     Write-Host "  [OK] win-unpacked/ removed." -ForegroundColor Gray
 }
 $backendExe = Join-Path $root "dist\app.exe"
-if (-not $KeepBackendExe -and (Test-Path $backendExe)) {
+if (Test-Path $backendExe) {
     Remove-Item -Force $backendExe
     Write-Host "  [OK] app.exe removed." -ForegroundColor Gray
 }

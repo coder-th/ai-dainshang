@@ -38,22 +38,14 @@ $ghToken = ($envLine -split "=", 2)[1].Trim()
 $env:GH_TOKEN = $ghToken
 Write-Host "[OK] GitHub token loaded." -ForegroundColor Green
 
-# --- Full rebuild before publish ---
-Write-Host "`n[Build] Running full build before publish..." -ForegroundColor Cyan
-& (Join-Path $root "build.ps1") -KeepBackendExe
+# --- Full rebuild + publish ---
+Write-Host "`n[Build] Running full build with publish..." -ForegroundColor Cyan
+& (Join-Path $root "build.ps1") -Publish
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] build.ps1 failed, aborting publish." -ForegroundColor Red
     exit 1
 }
-Write-Host "  [OK] Build complete." -ForegroundColor Green
-
-# --- Publish to GitHub ---
-Write-Host "`n[Publish] Running electron-builder with --publish always..." -ForegroundColor Cyan
-npx electron-builder --win --x64 --publish always
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] electron-builder publish failed (exit code $LASTEXITCODE)" -ForegroundColor Red
-    exit 1
-}
+Write-Host "  [OK] Build + publish complete." -ForegroundColor Green
 
 # --- Create and push git tag ---
 Write-Host "`n[Tag] Creating git tag $versionTag..." -ForegroundColor Cyan
