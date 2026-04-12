@@ -182,37 +182,43 @@ function waitFor(url, onReady, retries = 80) {
 function setupAutoUpdater(win) {
   if (!app.isPackaged) return; // 开发模式跳过
 
-  autoUpdater.autoDownload = true;       // 后台自动下载
-  autoUpdater.autoInstallOnAppQuit = true; // 退出时自动安装
+  autoUpdater.autoDownload = false;         // 手动控制下载时机
+  autoUpdater.autoInstallOnAppQuit = true;  // 退出时自动安装
+
+  const send = (status, payload = {}) =>
+    win.webContents.send("updater-status", { status, ...payload });
+
+  autoUpdater.on("checking-for-update", () => send("checking"));
 
   autoUpdater.on("update-available", (info) => {
-    dialog.showMessageBox(win, {
-      type: "info",
-      title: "发现新版本",
-      message: `发现新版本 v${info.version}，正在后台下载，下载完成后将提示安装。`,
-      buttons: ["好的"],
-    });
+    send("available", { version: info.version });
+    autoUpdater.downloadUpdate(); // 确认有更新后自动开始下载
   });
 
-  autoUpdater.on("update-downloaded", () => {
-    dialog.showMessageBox(win, {
-      type: "question",
-      title: "更新已就绪",
-      message: "新版本已下载完成，立即重启安装？",
-      buttons: ["立即安装", "稍后安装"],
-      defaultId: 0,
-    }).then(({ response }) => {
-      if (response === 0) {
-        autoUpdater.quitAndInstall();
-      }
-    });
-  });
+  autoUpdater.on("update-not-available", () => send("not-available"));
+
+  autoUpdater.on("download-progress", ({ percent }) =>
+    send("downloading", { percent: Math.floor(percent) })
+  );
+
+  autoUpdater.on("update-downloaded", () => send("downloaded"));
 
   autoUpdater.on("error", (err) => {
     console.error("[updater] error:", err.message);
+    send("error", { message: err.message });
   });
 
-  // 启动后 5 秒检查，之后每 6 小时检查一次
+  // IPC: 渲染层手动触发检查
+  ipcMain.handle("check-for-updates", () => {
+    autoUpdater.checkForUpdates();
+  });
+
+  // IPC: 渲染层触发立即安装
+  ipcMain.handle("install-update", () => {
+    autoUpdater.quitAndInstall();
+  });
+
+  // 启动后 5 秒静默检查，之后每 6 小时检查一次
   setTimeout(() => autoUpdater.checkForUpdates(), 5000);
   setInterval(() => autoUpdater.checkForUpdates(), 6 * 60 * 60 * 1000);
 }
