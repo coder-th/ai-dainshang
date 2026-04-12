@@ -54,14 +54,62 @@ export const generateApi = {
 // ─── Video API ────────────────────────────────────────────────────────────────
 export const videoApi = {
   /**
+   * 提交视频生成任务
    * @param {{
    *   api_key: string,
    *   model: string,
    *   prompt: string,
-   *   ratio: string,
-   *   duration: number
+   *   images?: string[],
+   *   aspect_ratio?: string,
+   *   duration?: number
    * }} data
    */
   generate: (data) => generateHttp.post("/generate-video/", data),
+
+  /**
+   * 查询视频任务状态
+   * @param {{ task_id: string, api_key: string, model: string }} params
+   */
+  queryTask: (params) => http.get("/video-task/", { params }),
+};
+
+// ─── Settings API ─────────────────────────────────────────────────────────────
+export const settingsApi = {
+  /** 读取配置项，返回 { key, value } */
+  get: (key)         => http.get(`/settings/${key}/`),
+  /** 保存配置项 */
+  set: (key, value)  => http.put(`/settings/${key}/`, { value }),
+  /** 删除配置项（恢复默认）*/
+  del: (key)         => http.delete(`/settings/${key}/`),
+};
+
+// ─── Video History API ────────────────────────────────────────────────────────
+export const historyApi = {
+  /** 获取最近 30 天的视频历史（降序）*/
+  list: ()       => http.get("/video-history/"),
+
+  /** 新建一条历史记录 */
+  create: (data) => http.post("/video-history/", data),
+
+  /** 删除单条历史记录 */
+  delete: (id)   => http.delete(`/video-history/${id}/`),
+
+  /** 清空所有历史记录 */
+  clearAll: ()   => http.delete("/video-history/clear/"),
+};
+
+// ─── Image History API ────────────────────────────────────────────────────────
+export const imageHistoryApi = {
+  /** 获取最近 30 天的图片历史（降序）*/
+  list: ()       => http.get("/image-history/"),
+
+  /** 新建一条历史记录 */
+  create: (data) => http.post("/image-history/", data),
+
+  /** 删除单条历史记录 */
+  delete: (id)   => http.delete(`/image-history/${id}/`),
+
+  /** 清空所有历史记录 */
+  clearAll: ()   => http.delete("/image-history/clear/"),
 };
 

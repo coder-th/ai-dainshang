@@ -14,11 +14,14 @@
             />
             <el-button @click="selectDir">浏览</el-button>
           </div>
-          <div class="path-hint">文件将保存至该目录，留空则使用程序默认目录</div>
+          <div class="path-hint">
+            视频和图片将保存至该目录下的 videos/ 和 images/ 子文件夹。
+            留空则使用程序默认目录。
+          </div>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="save">保存设置</el-button>
-          <el-button @click="reset">恢复默认</el-button>
+          <el-button type="primary" :loading="saving" @click="save">保存设置</el-button>
+          <el-button :loading="saving" @click="reset">恢复默认</el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -26,36 +29,57 @@
 </template>
 
 <script setup>
-import { reactive, onMounted } from "vue";
-import { ElMessage } from "element-plus";
+import { reactive, ref, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { settingsApi } from '@/api/index.js'
 
-const STORAGE_KEY = "settings_exportPath";
+const SETTINGS_KEY = 'export_path'
 
-const form = reactive({ exportPath: "" });
+const form = reactive({ exportPath: '' })
+const saving = ref(false)
 
-onMounted(() => {
-  form.exportPath = localStorage.getItem(STORAGE_KEY) || "";
-});
+onMounted(async () => {
+  try {
+    const { data } = await settingsApi.get(SETTINGS_KEY)
+    form.exportPath = data.value || ''
+  } catch {
+    form.exportPath = ''
+  }
+})
 
 async function selectDir() {
-  const api = window.electronAPI;
+  const api = window.electronAPI
   if (!api?.selectDirectory) {
-    ElMessage.warning("目录选择仅在桌面端可用");
-    return;
+    ElMessage.warning('目录选择仅在桌面端可用')
+    return
   }
-  const dir = await api.selectDirectory();
-  if (dir) form.exportPath = dir;
+  const dir = await api.selectDirectory()
+  if (dir) form.exportPath = dir
 }
 
-function save() {
-  localStorage.setItem(STORAGE_KEY, form.exportPath);
-  ElMessage.success("设置已保存");
+async function save() {
+  saving.value = true
+  try {
+    await settingsApi.set(SETTINGS_KEY, form.exportPath)
+    ElMessage.success('设置已保存')
+  } catch {
+    ElMessage.error('保存失败，请重试')
+  } finally {
+    saving.value = false
+  }
 }
 
-function reset() {
-  form.exportPath = "";
-  localStorage.removeItem(STORAGE_KEY);
-  ElMessage.info("已恢复默认");
+async function reset() {
+  saving.value = true
+  try {
+    await settingsApi.del(SETTINGS_KEY)
+    form.exportPath = ''
+    ElMessage.info('已恢复默认')
+  } catch {
+    ElMessage.error('重置失败，请重试')
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 
@@ -74,5 +98,6 @@ function reset() {
   font-size: 12px;
   color: #8c8c8c;
   margin-top: 4px;
+  line-height: 1.6;
 }
 </style>

@@ -12,6 +12,10 @@
         <el-icon><Setting /></el-icon>
         快速设置
       </el-button>
+      <el-button class="quick-setup-btn" size="small" round @click="showImageHistory = true">
+        <el-icon><Clock /></el-icon>
+        历史记录
+      </el-button>
     </div>
 
     <!-- 主内容区：左右两栏 -->
@@ -207,6 +211,9 @@
     <!-- 快速设置对话框 -->
     <QuickSettingsDialog v-model="showSettings" :active-provider="settingsActiveProvider" />
 
+    <!-- 图片历史记录对话框 -->
+    <ImageHistoryDialog v-model="showImageHistory" />
+
     <!-- 上传图片预览器 -->
     <el-image-viewer
       v-if="uploadPreview.visible"
@@ -245,7 +252,7 @@ import { ref, reactive, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   Setting, MagicStick, Lightning, EditPen, Promotion, Close,
-  Picture, StarFilled, ArrowDown, Brush, Plus, Aim,
+  Picture, StarFilled, ArrowDown, Brush, Plus, Aim, Clock,
 } from '@element-plus/icons-vue'
 import { getImageModelById, getProviderIdByModelId } from '@/config/models.js'
 import { getProviderById } from '@/config/providers.js'
@@ -255,6 +262,7 @@ import ParamsPanel from '@/components/ParamsPanel.vue'
 import ModelSelectDialog from '@/components/ModelSelectDialog.vue'
 import ResultsSection from '@/components/ResultsSection.vue'
 import QuickSettingsDialog from '@/components/QuickSettingsDialog.vue'
+import ImageHistoryDialog from '@/components/ImageHistoryDialog.vue'
 
 // ── 模型 ──────────────────────────────────────────
 const currentModelId = ref('nano-banana-2')
@@ -281,6 +289,7 @@ const params = reactive({
 // ── 对话框状态 ─────────────────────────────────────
 const showModelDialog = ref(false)
 const showSettings = ref(false)
+const showImageHistory = ref(false)
 const settingsActiveProvider = ref(currentProviderId.value)
 
 // ── 图片上传 ───────────────────────────────────────

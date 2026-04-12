@@ -12,15 +12,27 @@
 export const PROVIDERS = [
   {
     id: 'lingy',
-    name: '灵芽AI',
+    name: '灵芽AI（图片）',
     storageKey: 'api_key_lingy',
-    placeholder: '请输入灵芽AI的 API Key',
+    placeholder: '请输入灵芽AI的 API Key（图片生成）',
+  },
+  {
+    id: 'lingy_video',
+    name: '灵芽AI（视频）',
+    storageKey: 'api_key_lingy_video',
+    placeholder: '请输入灵芽AI的 API Key（视频生成）',
   },
   {
     id: 'yunwu',
-    name: '云雾AI',
+    name: '云雾AI（图片）',
     storageKey: 'api_key_yunwu',
-    placeholder: '请输入云雾AI的 API Key',
+    placeholder: '请输入云雾AI的 API Key（图片生成）',
+  },
+  {
+    id: 'yunwu_video',
+    name: '云雾AI（视频）',
+    storageKey: 'api_key_yunwu_video',
+    placeholder: '请输入云雾AI的 API Key（视频生成）',
   },
 ]
 

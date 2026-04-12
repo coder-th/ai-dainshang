@@ -254,26 +254,282 @@ export const IMAGE_MODELS = [
 
 // ─── 视频模型配置 ──────────────────────────────────────────────────────────────
 
+/** 视频比例选项（仅 veo3 系列支持） */
 export const VIDEO_RATIO_OPTIONS = [
   { label: '16:9 (横屏)', value: '16:9' },
   { label: '9:16 (竖屏)', value: '9:16' },
-  { label: '1:1 (方形)', value: '1:1' },
 ]
 
+/** 视频时长选项（秒） */
 export const VIDEO_DURATION_OPTIONS = [
   { label: '5 秒', value: 5 },
-  { label: '10 秒', value: 10 },
+  { label: '6 秒', value: 6 },
+  { label: '7 秒', value: 7 },
+  { label: '8 秒', value: 8 },
 ]
 
-/** @type {Array<{id:string, name:string, desc:string, disabled:boolean}>} */
+/**
+ * @typedef {Object} VideoModelConfig
+ * @property {string}  id       API 传参使用的 model 字符串
+ * @property {string}  name     显示名称
+ * @property {string}  series   系列分组，用于 UI 下拉分组
+ * @property {string}  tag      特性标签（推荐 / 高质量 / 4K 等）
+ * @property {string}  provider 供应商 id
+ * @property {string}  desc     模型描述
+ * @property {boolean} disabled 是否禁用
+ */
+
+/** @type {VideoModelConfig[]} */
 export const VIDEO_MODELS = [
+  // ── 灵芽AI Veo 3.1 系列 ──────────────────────────────────────────────────────
   {
-    id: 'stub-video',
-    name: '视频生成（开发中）',
-    desc: '视频生成功能正在接入中，敬请期待',
-    disabled: true,
+    id: 'veo_3_1-fast',
+    name: 'Veo 3.1 Fast（灵芽）',
+    series: '灵芽 Veo 3.1',
+    tag: '推荐',
+    provider: 'lingy_video',
+    desc: '灵芽AI Veo 3.1 快速模式，支持首尾帧参考图，固定生成 8 秒视频',
+    disabled: false,
+  },
+  {
+    id: 'veo_3_1',
+    name: 'Veo 3.1（灵芽）',
+    series: '灵芽 Veo 3.1',
+    tag: '均衡',
+    provider: 'lingy_video',
+    desc: '灵芽AI Veo 3.1 专业版，质量更高，支持首尾帧参考图，固定生成 8 秒视频',
+    disabled: false,
+  },
+  {
+    id: 'veo_3_1-fast-4K',
+    name: 'Veo 3.1 Fast 4K（灵芽）',
+    series: '灵芽 Veo 3.1',
+    tag: '4K',
+    provider: 'lingy_video',
+    desc: '灵芽AI Veo 3.1 快速 4K 版本，支持首尾帧参考图，固定生成 8 秒视频',
+    disabled: false,
+  },
+  {
+    id: 'veo_3_1-4K',
+    name: 'Veo 3.1 4K（灵芽）',
+    series: '灵芽 Veo 3.1',
+    tag: '4K高质量',
+    provider: 'lingy_video',
+    desc: '灵芽AI Veo 3.1 专业 4K 版本，质量最高，支持首尾帧参考图，固定生成 8 秒视频',
+    disabled: false,
+  },
+
+  // ── 云雾AI Veo 3.1 系列（最新，推荐）──────────────────────────────────────────
+  {
+    id: 'veo3.1-fast',
+    name: 'Veo 3.1 Fast（云雾）',
+    series: 'Veo 3.1（云雾）',
+    tag: '推荐',
+    provider: 'yunwu_video',
+    desc: '最新 Veo 3.1 快速模式，支持音频生成，性价比最高，自适应首尾帧和文生视频',
+    disabled: false,
+  },
+  {
+    id: 'veo3.1',
+    name: 'Veo 3.1（云雾）',
+    series: 'Veo 3.1（云雾）',
+    tag: '均衡',
+    provider: 'yunwu_video',
+    desc: '最新 Veo 3.1 标准模式，支持视频自动配套音频生成，自适应首尾帧和文生视频',
+    disabled: false,
+  },
+  {
+    id: 'veo3.1-pro',
+    name: 'Veo 3.1 Pro（云雾）',
+    series: 'Veo 3.1（云雾）',
+    tag: '高质量',
+    provider: 'yunwu_video',
+    desc: '最新 Veo 3.1 高质量模式，支持音频生成，质量超高，自适应首尾帧和文生视频',
+    disabled: false,
+  },
+  {
+    id: 'veo3.1-4k',
+    name: 'Veo 3.1 4K（云雾）',
+    series: 'Veo 3.1（云雾）',
+    tag: '4K',
+    provider: 'yunwu_video',
+    desc: '最新 Veo 3.1 快速+4K 模式，支持音频生成，超高分辨率输出，自适应首尾帧',
+    disabled: false,
+  },
+  {
+    id: 'veo3.1-pro-4k',
+    name: 'Veo 3.1 Pro 4K（云雾）',
+    series: 'Veo 3.1（云雾）',
+    tag: '4K高质量',
+    provider: 'yunwu_video',
+    desc: '最新 Veo 3.1 高质量+4K 模式，支持音频生成，旗舰品质，自适应首尾帧',
+    disabled: false,
+  },
+
+  // ── Veo 3 系列（支持音频）────────────────────────────────────────────────────
+  {
+    id: 'veo3-fast',
+    name: 'Veo 3 Fast（云雾）',
+    series: 'Veo 3（云雾）',
+    tag: '快速',
+    provider: 'yunwu_video',
+    desc: 'Veo 3 快速模式，全球唯一支持视频自动配套音频生成，性价比极高',
+    disabled: false,
+  },
+  {
+    id: 'veo3',
+    name: 'Veo 3（云雾）',
+    series: 'Veo 3（云雾）',
+    tag: '标准',
+    provider: 'yunwu_video',
+    desc: 'Google 官方最新视频生成模型，生成的视频带有声音，目前全球独一家带声音的视频模型',
+    disabled: false,
+  },
+  {
+    id: 'veo3-fast-frames',
+    name: 'Veo 3 Fast Frames（云雾）',
+    series: 'Veo 3（云雾）',
+    tag: '快速+首帧',
+    provider: 'yunwu_video',
+    desc: 'Veo 3 快速模式，支持音频生成，支持首帧图片传递，性价比最高',
+    disabled: false,
+  },
+  {
+    id: 'veo3-frames',
+    name: 'Veo 3 Frames（云雾）',
+    series: 'Veo 3（云雾）',
+    tag: '首帧',
+    provider: 'yunwu_video',
+    desc: 'Veo 3 标准模式，支持音频生成，支持首帧图片传递',
+    disabled: false,
+  },
+  {
+    id: 'veo3-pro',
+    name: 'Veo 3 Pro（云雾）',
+    series: 'Veo 3（云雾）',
+    tag: '高质量',
+    provider: 'yunwu_video',
+    desc: 'Veo 3 高质量模式，支持音频生成，质量超高，价格较高',
+    disabled: false,
+  },
+  {
+    id: 'veo3-pro-frames',
+    name: 'Veo 3 Pro Frames（云雾）',
+    series: 'Veo 3（云雾）',
+    tag: '高质量+首帧',
+    provider: 'yunwu_video',
+    desc: 'Veo 3 高质量模式，支持音频生成，支持首帧传递（不支持尾帧），质量超高',
+    disabled: false,
+  },
+
+  // ── Veo 2 系列────────────────────────────────────────────────────────────────
+  {
+    id: 'veo2-fast',
+    name: 'Veo 2 Fast（云雾）',
+    series: 'Veo 2（云雾）',
+    tag: '快速',
+    provider: 'yunwu_video',
+    desc: 'Google Veo 2 快速模式，质量好速度快，性价比高',
+    disabled: false,
+  },
+  {
+    id: 'veo2',
+    name: 'Veo 2（云雾）',
+    series: 'Veo 2（云雾）',
+    tag: '标准',
+    provider: 'yunwu_video',
+    desc: 'Google 高级视频 AI 模型，Veo 2 标准模式，质量好速度快',
+    disabled: false,
+  },
+  {
+    id: 'veo2-fast-frames',
+    name: 'Veo 2 Fast Frames （云雾）',
+    series: 'Veo 2（云雾）',
+    tag: '首尾帧',
+    provider: 'yunwu_video',
+    desc: 'Veo 2 快速模式，支持首尾帧图片传递（最多2张），打造精准镜头控制',
+    disabled: false,
+  },
+  {
+    id: 'veo2-fast-components',
+    name: 'Veo 2 Fast Components（云雾）',
+    series: 'Veo 2（云雾）',
+    tag: '元素合成',
+    provider: 'yunwu_video',
+    desc: 'Veo 2 快速模式，支持上传最多3张图片素材，合并为视频中的各个元素（如背景、天空等）',
+    disabled: false,
+  },
+  {
+    id: 'veo2-pro',
+    name: 'Veo 2 Pro（云雾）',
+    series: 'Veo 2（云雾）',
+    tag: '高质量',
+    provider: 'yunwu_video',
+    desc: 'Veo 2 高质量模式，质量很高，价格较贵',
+    disabled: false,
+  },
+  {
+    id: 'veo2-pro-components',
+    name: 'Veo 2 Pro Components（云雾）',
+    series: 'Veo 2（云雾）',
+    tag: '高质量+元素',
+    provider: 'yunwu_video',
+    desc: 'Veo 2 Pro 模式，支持上传最多3张图片素材合并到视频中，旗舰品质',
+    disabled: false,
   },
 ]
+
+// ─── 视频模型工具函数 ──────────────────────────────────────────────────────────
+
+/** 按 id 查找视频模型配置，未找到时返回第一个 */
+export function getVideoModelById(id) {
+  return VIDEO_MODELS.find(m => m.id === id) ?? VIDEO_MODELS[0]
+}
+
+/**
+ * 返回指定视频模型的图片上传能力。
+ * @returns {{ maxImages: number, label: string }}
+ */
+export function getVideoModelImageCapability(modelId) {
+  // 灵芽 Veo 3.1 系列：支持首尾帧（按顺序上传）
+  if (modelId.startsWith('veo_3_')) {
+    return { maxImages: 2, label: '参考图（首帧/尾帧）' }
+  }
+  if (modelId === 'veo3-pro-frames') {
+    return { maxImages: 1, label: '首帧参考图' }
+  }
+  if (modelId.endsWith('-frames') || modelId === 'veo3-frames') {
+    return { maxImages: 2, label: '首/尾帧参考图' }
+  }
+  if (modelId.endsWith('-components')) {
+    return { maxImages: 3, label: '视频元素图片' }
+  }
+  // veo3.1 系列：自适应首尾帧
+  if (modelId.startsWith('veo3.1')) {
+    return { maxImages: 2, label: '参考图（自适应首尾帧）' }
+  }
+  return { maxImages: 0, label: '' }
+}
+
+/**
+ * 返回指定视频模型是否支持 aspect_ratio 参数。
+ */
+export function supportsVideoAspectRatio(modelId) {
+  return modelId.startsWith('veo3') || modelId.startsWith('veo_3_')
+}
+
+/**
+ * 按 series 字段对 VIDEO_MODELS 分组，返回供 el-option-group 使用的数组。
+ * @returns {Array<{label: string, models: VideoModelConfig[]}>}
+ */
+export function getVideoModelGroups() {
+  const map = new Map()
+  for (const m of VIDEO_MODELS) {
+    if (!map.has(m.series)) map.set(m.series, [])
+    map.get(m.series).push(m)
+  }
+  return Array.from(map.entries()).map(([label, models]) => ({ label, models }))
+}
 
 // ─── 工具函数 ──────────────────────────────────────────────────────────────────
 

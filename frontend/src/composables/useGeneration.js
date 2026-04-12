@@ -2,6 +2,8 @@ import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { generateApi } from '@/api/index.js'
 import { getApiKey } from '@/config/providers.js'
+import { getImageModelById } from '@/config/models.js'
+import { appendImageHistory, compressImageBlob, compressImageDataUri, createThumbnail } from '@/utils/imageHistory.js'
 
 function _buildProxyUrl(remoteUrl) {
   const base = import.meta.env.DEV ? '/api' : `${window.location.origin}/api`
@@ -55,6 +57,59 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, cur
   const isGenerating = ref(false)
   const isBatchSaving = ref(false)
   const preview = ref({ visible: false, urls: [], index: 0 })
+
+  // ─── 历史记录保存（fire-and-forget）────────────────────────────────────────
+  async function _saveHistory(tasks, generationTimeMs) {
+    try {
+      const results = await Promise.all(tasks.map(async (task) => {
+        let image_data = ''
+        if (task.status === 'done') {
+          if (task._blob) {
+            image_data = await compressImageBlob(task._blob, 1024)
+          } else if (task.resultUrl?.startsWith('data:')) {
+            image_data = await compressImageDataUri(task.resultUrl, 1024)
+          }
+          // http/https 且 blob 获取失败时 image_data 保持空字符串
+        }
+        return {
+          index:      task.index,
+          image_data,
+          error:      task.error    || null,
+          file_size:  task.fileSize || '',
+          done_at:    task.doneAt   || null,
+        }
+      }))
+
+      const doneCount = tasks.filter(t => t.status === 'done').length
+      const errCount  = tasks.filter(t => t.status === 'error').length
+      const status    = errCount === 0 ? 'done' : doneCount === 0 ? 'error' : 'partial'
+
+      const baseImageThumbs = await Promise.all(
+        baseImages.value.map(img => createThumbnail(img.b64))
+      )
+      const refImageThumbs = await Promise.all(
+        referenceImages.value.map(img => createThumbnail(img.b64))
+      )
+
+      const modelConfig = getImageModelById(currentModelId.value)
+      appendImageHistory({
+        model:            currentModelId.value,
+        modelName:        modelConfig.name,
+        provider:         currentProviderId.value,
+        prompt:           prompt.value,
+        aspectRatio:      params.aspectRatio  || '',
+        imageSize:        params.resolution   || '',
+        search:           params.webAccess === 'true',
+        baseImageThumbs,
+        refImageThumbs,
+        results,
+        status,
+        generationTimeMs,
+      })
+    } catch (e) {
+      console.warn('[ImageHistory] 保存历史失败:', e)
+    }
+  }
 
   const doneTaskCount = computed(() =>
     generationTasks.value.filter(t => t.status === 'done').length
@@ -188,6 +243,7 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, cur
         task.status = 'error'
       }
       isGenerating.value = false
+      _saveHistory([task], Date.now() - t0)  // fire-and-forget
       return
     }
 
@@ -206,18 +262,21 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, cur
       _blob: null,
     }))
 
+    const batchT0 = Date.now()
     await Promise.allSettled(
       generationTasks.value.map(async (task) => {
         const baseB64 = task.baseImage.b64
         await _executeTask(task, baseB64, refB64s)
       })
     )
+    const batchElapsedMs = Date.now() - batchT0
 
     isGenerating.value = false
     const done = doneTaskCount.value
     if (done > 0) {
       ElMessage.success(`${done}/${generationTasks.value.length} 张图片生成完成`)
     }
+    _saveHistory(generationTasks.value, batchElapsedMs)  // fire-and-forget
   }
 
   async function retryTask(task) {

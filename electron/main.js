@@ -3,6 +3,7 @@ const { spawn } = require("child_process");
 const path = require("path");
 const http = require("http");
 const fs = require("fs");
+const { autoUpdater } = require("electron-updater");
 
 const PORT = 9527;
 const BACKEND_URL = `http://127.0.0.1:${PORT}`;
@@ -176,7 +177,47 @@ function waitFor(url, onReady, retries = 80) {
   req.setTimeout(1000, () => req.destroy());
 }
 
-// ─── App lifecycle ────────────────────────────────────────────────────────────
+// ─── Auto-updater ─────────────────────────────────────────────────────────────
+
+function setupAutoUpdater(win) {
+  if (!app.isPackaged) return; // 开发模式跳过
+
+  autoUpdater.autoDownload = true;       // 后台自动下载
+  autoUpdater.autoInstallOnAppQuit = true; // 退出时自动安装
+
+  autoUpdater.on("update-available", (info) => {
+    dialog.showMessageBox(win, {
+      type: "info",
+      title: "发现新版本",
+      message: `发现新版本 v${info.version}，正在后台下载，下载完成后将提示安装。`,
+      buttons: ["好的"],
+    });
+  });
+
+  autoUpdater.on("update-downloaded", () => {
+    dialog.showMessageBox(win, {
+      type: "question",
+      title: "更新已就绪",
+      message: "新版本已下载完成，立即重启安装？",
+      buttons: ["立即安装", "稍后安装"],
+      defaultId: 0,
+    }).then(({ response }) => {
+      if (response === 0) {
+        autoUpdater.quitAndInstall();
+      }
+    });
+  });
+
+  autoUpdater.on("error", (err) => {
+    console.error("[updater] error:", err.message);
+  });
+
+  // 启动后 5 秒检查，之后每 6 小时检查一次
+  setTimeout(() => autoUpdater.checkForUpdates(), 5000);
+  setInterval(() => autoUpdater.checkForUpdates(), 6 * 60 * 60 * 1000);
+}
+
+
 
 let djangoProcess = null;
 let isQuitting = false; // 防止 close 事件与 app.exit 形成重入循环
@@ -205,11 +246,13 @@ if (!gotLock) {
       waitFor(`${BACKEND_URL}/api/`, () => {
         waitFor(DEV_URL, () => {
           mainWindow = createMainWindow(loadingWin);
+          setupAutoUpdater(mainWindow);
         });
       });
     } else {
       waitFor(`${BACKEND_URL}/api/`, () => {
         mainWindow = createMainWindow(loadingWin);
+        setupAutoUpdater(mainWindow);
       });
     }
   });

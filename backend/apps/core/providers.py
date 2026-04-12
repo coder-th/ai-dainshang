@@ -285,21 +285,271 @@ class BaseVideoProvider(ABC):
         """
         ...
 
+    def get_request_headers(self, api_key: str) -> dict:
+        return {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
 
-class StubVideoProvider(BaseVideoProvider):
-    """视频生成占位 Provider（TODO: 接入真实服务）"""
+    def get_request_kwargs(self, api_key: str, payload: dict, model: str) -> dict:
+        return {
+            "url": self.api_url,
+            "json": payload,
+            "headers": self.get_request_headers(api_key),
+        }
 
-    supported_models = ["stub-video"]
+
+class YunwuVeoVideoProvider(BaseVideoProvider):
+    """
+    云雾AI Veo 视频生成 Provider
+    提交端点：POST https://yunwu.ai/v1/video/create
+    任务查询：GET  https://yunwu.ai/v1/video/query?task_id={task_id}
+    """
+
+    provider_id = "yunwu"
+
+    supported_models = [
+        "veo2", "veo2-fast", "veo2-fast-frames", "veo2-fast-components",
+        "veo2-pro", "veo2-pro-components",
+        "veo3", "veo3-fast", "veo3-fast-frames", "veo3-frames",
+        "veo3-pro", "veo3-pro-frames",
+        "veo3.1", "veo3.1-fast", "veo3.1-pro",
+        "veo3.1-4k", "veo3.1-pro-4k",
+    ]
+
+    _BASE_URL = "https://yunwu.ai"
 
     @property
     def api_url(self) -> str:
-        return ""  # TODO: 接入后填写
+        return f"{self._BASE_URL}/v1/video/create"
+
+    @property
+    def _task_query_url(self) -> str:
+        return f"{self._BASE_URL}/v1/video/query"
 
     def build_payload(self, model: str, prompt: str, **kwargs) -> dict:
-        raise NotImplementedError("视频生成接口尚未实现")
+        payload: dict = {
+            "model": model,
+            "prompt": prompt,
+            "enable_upsample": True,
+            "enhance_prompt": True,
+        }
+
+        # 图片参数：去除 data URI 前缀，传纯 base64
+        images: list = kwargs.get("images") or []
+        if images:
+            # payload["images"] = [_strip_data_uri(img) for img in images]
+            payload["images"] = images
+
+        # 视频比例：仅 veo3 系列支持（"16:9" 或 "9:16"）
+        aspect_ratio: str | None = kwargs.get("aspect_ratio")
+        if aspect_ratio and model.startswith("veo3"):
+            payload["aspect_ratio"] = aspect_ratio
+
+        # 时长（秒）
+        duration = kwargs.get("duration")
+        if duration is not None:
+            payload["duration"] = int(duration)
+
+        return payload
 
     def parse_response(self, data: dict) -> dict:
-        raise NotImplementedError("视频生成接口尚未实现")
+        # 异步任务：返回 task_id
+        task_id = data.get("task_id") or data.get("id")
+        if task_id:
+            return {"type": "task_id", "value": str(task_id)}
+        # 同步直接返回视频 URL
+        url = data.get("url") or data.get("video_url")
+        if url:
+            return {"type": "url", "value": url}
+        raise KeyError(f"无法解析视频生成响应，字段: {list(data.keys())}")
+
+    def query_task(self, api_key: str, task_id: str) -> dict:
+        """
+        查询异步视频任务状态。
+        返回规范化结果：
+          {"status": "pending", "raw_status": "video_generating", "status_text": "视频生成中…"}
+          {"status": "done", "video_url": "...", "enhanced_prompt": "...", ...}
+          {"status": "error", "error": "...", ...}
+        """
+        _STATUS_TEXT = {
+            "pending":                    "等待处理中…",
+            "image_downloading":          "下载参考图片中…",
+            "video_generating":           "视频生成中…",
+            "video_generation_completed": "视频生成完成，超分辨率优化中…",
+            "video_generation_failed":    "视频生成失败",
+            "video_upsampling":           "超分辨率优化中…",
+            "video_upsampling_completed": "超分优化完成，收尾处理中…",
+            "video_upsampling_failed":    "超分辨率优化失败",
+            "completed":                  "视频生成完成！",
+            "failed":                     "任务失败",
+            "error":                      "发生错误",
+        }
+        _TERMINAL_SUCCESS = {"completed"}
+        _TERMINAL_FAILURE = {"failed", "error", "video_generation_failed", "video_upsampling_failed"}
+
+        import requests as req
+        headers = self.get_request_headers(api_key)
+        resp = req.get(
+            self._task_query_url,
+            headers=headers,
+            params={"id": task_id},   # 注意：参数名是 "id" 而非 "task_id"
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        raw_status  = (data.get("status") or "").lower()
+        status_text = _STATUS_TEXT.get(raw_status, f"状态: {raw_status}")
+        base = {"raw_status": raw_status, "status_text": status_text}
+
+        if raw_status in _TERMINAL_SUCCESS:
+            return {**base, "status": "done",
+                    "video_url": data.get("video_url"),
+                    "enhanced_prompt": data.get("enhanced_prompt", "")}
+        if raw_status in _TERMINAL_FAILURE:
+            err_msg = data.get("error") or data.get("message") or status_text
+            return {**base, "status": "error", "error": str(err_msg)}
+        return {**base, "status": "pending"}
+
+
+class LingyVideoProvider(BaseVideoProvider):
+    """
+    灵芽AI Veo 视频生成 Provider
+    提交端点：POST https://api.lingyaai.cn/v1/videos  (multipart/form-data)
+    任务查询：GET  https://api.lingyaai.cn/v1/videos/{id}
+
+    size 参数格式：宽x高，如 16x9（横屏）、9x16（竖屏）
+    图片参考：multipart input_reference 字段，首帧第 1 张，尾帧第 2 张
+    """
+
+    provider_id = "lingy_video"
+
+    supported_models = [
+        "veo_3_1-fast",
+        "veo_3_1",
+        "veo_3_1-fast-4K",
+        "veo_3_1-4K",
+    ]
+
+    _BASE_URL = "https://api.lingyaai.cn"
+
+    @property
+    def api_url(self) -> str:
+        return f"{self._BASE_URL}/v1/videos"
+
+    def get_request_headers(self, api_key: str) -> dict:
+        # 不设 Content-Type，由 requests 自动附加 multipart boundary
+        return {"Authorization": f"Bearer {api_key}"}
+
+    def build_payload(self, model: str, prompt: str, **kwargs) -> dict:
+        payload: dict = {
+            "prompt": prompt,
+            "model": model,
+        }
+        # aspect_ratio "16:9" → size "16x9"
+        aspect_ratio: str | None = kwargs.get("aspect_ratio")
+        if aspect_ratio:
+            payload["size"] = aspect_ratio.replace(":", "x")
+
+        # 图片列表暂存（get_request_kwargs 取用后构造 multipart files）
+        payload["_images"] = kwargs.get("images") or []
+        return payload
+
+    def get_request_kwargs(self, api_key: str, payload: dict, model: str = "") -> dict:  # noqa: ARG002
+        import base64
+
+        images = payload.get("_images") or []
+
+        # 全部字段走 multipart（text 字段用 (None, value) 元组），确保 Content-Type 为 multipart/form-data
+        multipart: list = []
+        for k, v in payload.items():
+            if k == "_images":
+                continue
+            if v is not None:
+                multipart.append((k, (None, str(v))))
+
+        # 图片字段：base64 data URI → bytes；URL → 直接传字符串
+        for img in images:
+            if not img:
+                continue
+            if ";base64," in img:
+                mime = img[5:img.index(";")] if img.startswith("data:") else "image/jpeg"
+                b64_data = img.split(";base64,", 1)[1]
+                img_bytes = base64.b64decode(b64_data)
+                ext = mime.split("/")[-1]
+                multipart.append(("input_reference", (f"image.{ext}", img_bytes, mime)))
+            elif img.startswith("http://") or img.startswith("https://"):
+                multipart.append(("input_reference", (None, img)))
+
+        return {
+            "url": self.api_url,
+            "files": multipart,
+            "headers": self.get_request_headers(api_key),
+        }
+
+    def parse_response(self, data: dict) -> dict:
+        task_id = data.get("id")
+        if task_id:
+            return {"type": "task_id", "value": str(task_id)}
+        raise KeyError(f"灵芽AI视频响应中未找到任务 ID，字段: {list(data.keys())}")
+
+    def query_task(self, api_key: str, task_id: str) -> dict:
+        """
+        查询灵芽AI异步视频任务状态。
+        返回规范化结果：
+          {"status": "pending", "status_text": "..."}
+          {"status": "done",    "video_url": "...", "enhanced_prompt": ""}
+          {"status": "error",   "error": "..."}
+
+        灵芽AI 响应字段：
+          id, object, model, status, progress(0-100), created_at,
+          completed_at, expires_at, size, seconds, video_url, error
+        """
+        _STATUS_TEXT = {
+            "queued":     "排队等待中…",
+            "processing": "视频生成中…",
+            "completed":  "视频生成完成！",
+            "failed":     "任务失败",
+        }
+        _TERMINAL_SUCCESS = {"completed"}
+        _TERMINAL_FAILURE = {"failed"}
+
+        import requests as req
+        headers = {"Authorization": f"Bearer {api_key}"}
+        resp = req.get(
+            f"{self._BASE_URL}/v1/videos/{task_id}",
+            headers=headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        raw_status = (data.get("status") or "").lower()
+        progress   = data.get("progress")  # 0-100，completed 时为 100
+
+        base_text  = _STATUS_TEXT.get(raw_status, f"状态: {raw_status}")
+        # 对 pending 状态附加进度百分比（如果有）
+        if progress is not None and raw_status not in _TERMINAL_SUCCESS | _TERMINAL_FAILURE:
+            status_text = f"{base_text}（{progress}%）"
+        else:
+            status_text = base_text
+
+        base = {"raw_status": raw_status, "status_text": status_text}
+
+        if raw_status in _TERMINAL_SUCCESS:
+            return {
+                **base,
+                "status":          "done",
+                "video_url":       data.get("video_url"),
+                "enhanced_prompt": "",
+            }
+
+        if raw_status in _TERMINAL_FAILURE:
+            err_msg = data.get("error") or data.get("message") or status_text
+            return {**base, "status": "error", "error": str(err_msg)}
+
+        return {**base, "status": "pending"}
 
 
 # ─── Provider 注册表 ──────────────────────────────────────────────────────────
@@ -311,7 +561,8 @@ _IMAGE_PROVIDERS: list[BaseImageProvider] = [
 ]
 
 _VIDEO_PROVIDERS: list[BaseVideoProvider] = [
-    StubVideoProvider(),
+    LingyVideoProvider(),
+    YunwuVeoVideoProvider(),
     # 新增视频 Provider 追加于此
 ]
 
