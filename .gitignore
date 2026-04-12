@@ -52,3 +52,5 @@ build/
 Thumbs.db
 
 *.zip
+logs/
+.env.local
