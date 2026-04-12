@@ -1,6 +1,6 @@
 {
   "name": "ai-dianshang",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "AI E-Commerce Management System",
   "main": "electron/main.js",
   "scripts": {
@@ -31,11 +31,30 @@
       "icon": "electron/assets/icon.ico",
       "target": [
         {
-          "target": "portable",
-          "arch": ["x64"]
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
-    "portable": {}
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerIcon": "electron/assets/icon.ico",
+      "uninstallerIcon": "electron/assets/icon.ico",
+      "installerHeaderIcon": "electron/assets/icon.ico",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "coder-th",
+      "repo": "ai-dainshang"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3"
   }
 }
