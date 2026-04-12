@@ -1,5 +1,10 @@
 # Full build script: Vue + Django(PyInstaller) + Electron installer
-# Usage: .\build.ps1
+# Usage: .\build.ps1 [-KeepBackendExe]
+#   -KeepBackendExe  Keep dist/app.exe after build (used by publish.ps1)
+
+param(
+    [switch]$KeepBackendExe
+)
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -18,6 +23,14 @@ function Assert-Ok($label) {
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host "  Full Build: Vue + Django + Electron Installer" -ForegroundColor Cyan
 Write-Host "================================================" -ForegroundColor Cyan
+
+# --- Pre-step: Clean dist ---
+$distPath = Join-Path $root "dist"
+if (Test-Path $distPath) {
+    Write-Host "`n[Pre] Cleaning dist folder..." -ForegroundColor Yellow
+    Get-ChildItem -Path $distPath -Recurse | Remove-Item -Recurse -Force
+    Write-Host "  [OK] dist/ cleaned." -ForegroundColor Green
+}
 
 # --- Step 1: Build Vue3 frontend ---
 Step 1 5 "Building Vue3 frontend..."
@@ -73,7 +86,19 @@ Step 5 5 "Building Electron installer (Windows NSIS)..."
 npm run build:win
 Assert-Ok "electron-builder"
 
+# --- Post-step: Remove intermediate artifacts ---
+$unpackedPath = Join-Path $root "dist\win-unpacked"
+if (Test-Path $unpackedPath) {
+    Remove-Item -Recurse -Force $unpackedPath
+    Write-Host "  [OK] win-unpacked/ removed." -ForegroundColor Gray
+}
+$backendExe = Join-Path $root "dist\app.exe"
+if (-not $KeepBackendExe -and (Test-Path $backendExe)) {
+    Remove-Item -Force $backendExe
+    Write-Host "  [OK] app.exe removed." -ForegroundColor Gray
+}
+
 Write-Host "`n================================================" -ForegroundColor Green
 Write-Host "  Build complete!" -ForegroundColor Green
-Write-Host "  Portable exe: dist\AI-Dianshang.exe" -ForegroundColor Green
+Write-Host "  Installer: dist\AI-Dianshang Setup*.exe" -ForegroundColor Green
 Write-Host "================================================`n" -ForegroundColor Green
