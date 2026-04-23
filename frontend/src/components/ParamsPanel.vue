@@ -61,6 +61,14 @@
         </el-select>
       </div>
 
+      <!-- 生成张数（仅支持多图输出的模型显示） -->
+      <div v-if="currentModel.supportsMultiOutput" class="param-item">
+        <label class="param-label">生成张数</label>
+        <el-select v-model="innerParams.nImages" class="param-select">
+          <el-option v-for="n in 1" :key="n" :label="`${n} 张`" :value="n" />
+        </el-select>
+      </div>
+
       <div class="params-tip">
         <el-text size="small" type="info">参数将自动保存</el-text>
       </div>
@@ -91,6 +99,11 @@ const innerParams = reactive({ ...props.modelValue })
   if (!model.supportedSizes.includes(innerParams.resolution)) {
     innerParams.resolution = model.defaultSize
   }
+  if (!model.supportsMultiOutput) {
+    innerParams.nImages = 1
+  } else if (!innerParams.nImages || innerParams.nImages < 1) {
+    innerParams.nImages = 1
+  }
 })()
 
 // 双向同步
@@ -107,6 +120,7 @@ watch(() => props.modelId, () => {
   innerParams.aspectRatio = model.defaultRatio
   innerParams.resolution = model.defaultSize
   if (!model.supportsSearch) innerParams.webAccess = 'false'
+  if (!model.supportsMultiOutput) innerParams.nImages = 1
 })
 
 function resetParams() {
@@ -114,6 +128,7 @@ function resetParams() {
   innerParams.aspectRatio = model.defaultRatio
   innerParams.resolution = model.defaultSize
   innerParams.webAccess = model.supportsSearch ? 'true' : 'false'
+  innerParams.nImages = 1
   ElMessage.success('参数已重置')
 }
 </script>

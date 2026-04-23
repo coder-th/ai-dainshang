@@ -34,6 +34,12 @@ export const PROVIDERS = [
     storageKey: 'api_key_yunwu_video',
     placeholder: '请输入云雾AI的 API Key（视频生成）',
   },
+  {
+    id: 'yunwu_gpt',
+    name: '云雾AI（GPT图像）',
+    storageKey: 'api_key_yunwu_gpt',
+    placeholder: '请输入云雾AI的 API Key（GPT 图像生成）',
+  },
 ]
 
 /** 按 id 查找供应商配置，未找到时返回第一个 */

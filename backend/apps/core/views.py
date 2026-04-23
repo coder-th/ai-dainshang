@@ -251,6 +251,7 @@ class GenerateView(APIView):
         search = bool(d.get("search", False))
         base_images = d.get("base_images") or []
         ref_images = d.get("ref_images") or []
+        n_images = max(1, min(int(d.get("n_images") or 1), 10))
 
         if not api_key:
             return Response({"error": "缺少 API 密钥"}, status=400)
@@ -274,27 +275,32 @@ class GenerateView(APIView):
                     aspect_ratio=aspect_ratio,
                     base_images=[] if is_text_to_image else [base_img],
                     ref_images=[] if is_text_to_image else ref_images,
+                    n=n_images,
                 )
-                url = _call_provider(api_key, payload, provider, model=model)
-                return {"index": idx, "url": url, "error": None}
+                raw = _call_provider(api_key, payload, provider, model=model)
+                # parse_response 可能返回单个 URL（str）或多个 URL（list[str]）
+                urls = raw if isinstance(raw, list) else [raw]
+                return [{"index": idx * n_images + i, "url": u, "error": None} for i, u in enumerate(urls)]
             except req.Timeout:
-                return {"index": idx, "url": None, "error": "请求超时，请重试"}
+                return [{"index": idx, "url": None, "error": "请求超时，请重试"}]
             except req.HTTPError as e:
                 try:
                     msg = e.response.json().get("error", {}).get("message", str(e))
                 except Exception:
                     msg = str(e)
-                return {"index": idx, "url": None, "error": f"API 错误: {msg}"}
+                return [{"index": idx, "url": None, "error": f"API 错误: {msg}"}]
             except req.RequestException as e:
-                return {"index": idx, "url": None, "error": f"网络错误: {str(e)}"}
+                return [{"index": idx, "url": None, "error": f"网络错误: {str(e)}"}]
             except (KeyError, IndexError) as e:
-                return {"index": idx, "url": None, "error": f"API 响应格式异常: {str(e)}"}
+                return [{"index": idx, "url": None, "error": f"API 响应格式异常: {str(e)}"}]
 
         # 文生图模式：创建单个虚拟任务（index=0，无基准图）
         tasks = [(0, None)] if is_text_to_image else list(enumerate(base_images))
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(tasks)) as pool:
-            results = list(pool.map(run_task, tasks))
+            nested = list(pool.map(run_task, tasks))
 
+        # 展平嵌套列表并按 index 排序
+        results = [item for sublist in nested for item in sublist]
         results.sort(key=lambda r: r["index"])
         return Response({"results": results})
 

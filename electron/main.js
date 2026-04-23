@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, shell, Menu, ipcMain } = require("electron");
+const { app, BrowserWindow, dialog, shell, ipcMain } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const http = require("http");
@@ -27,6 +27,8 @@ ipcMain.on("win-close", () => {
   if (win) win.close(); // 触发 win.on("close") 统一处理确认逻辑
 });
 ipcMain.handle("win-is-maximized", () => BrowserWindow.getFocusedWindow()?.isMaximized() ?? false);
+
+ipcMain.handle("get-version", () => app.getVersion());
 
 ipcMain.handle("select-directory", async () => {
   const win = BrowserWindow.getFocusedWindow();
@@ -179,45 +181,49 @@ function waitFor(url, onReady, retries = 80) {
 
 // ─── Auto-updater ─────────────────────────────────────────────────────────────
 
+let _updaterWin = null; // 延迟绑定窗口引用
+
+const sendUpdaterStatus = (status, payload = {}) => {
+  if (_updaterWin && !_updaterWin.isDestroyed()) {
+    _updaterWin.webContents.send("updater-status", { status, ...payload });
+  }
+};
+
+// 事件监听在模块加载时就注册，不依赖 setupAutoUpdater 是否已执行
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = true;
+
+autoUpdater.on("checking-for-update",   () => sendUpdaterStatus("checking"));
+autoUpdater.on("update-not-available",  () => sendUpdaterStatus("not-available"));
+autoUpdater.on("update-downloaded",     () => sendUpdaterStatus("downloaded"));
+autoUpdater.on("update-available", (info) => {
+  sendUpdaterStatus("available", { version: info.version });
+  autoUpdater.downloadUpdate();
+});
+autoUpdater.on("download-progress", ({ percent }) =>
+  sendUpdaterStatus("downloading", { percent: Math.floor(percent) })
+);
+autoUpdater.on("error", (err) => {
+  console.error("[updater] error:", err.message);
+  const isNoRelease = /Unable to find latest version|releases feed/i.test(err.message);
+  sendUpdaterStatus(isNoRelease ? "not-available" : "error", { message: err.message });
+});
+
+// IPC handlers — 模块加载时注册，任何时候都可响应
+ipcMain.removeHandler("check-for-updates"); // 防止热重载时重复注册
+ipcMain.handle("check-for-updates", async () => {
+  if (!app.isPackaged) return;
+  try { await autoUpdater.checkForUpdates(); } catch (e) { /* 已由 error 事件处理 */ }
+});
+
+ipcMain.removeHandler("install-update");
+ipcMain.handle("install-update", () => {
+  if (app.isPackaged) autoUpdater.quitAndInstall();
+});
+
 function setupAutoUpdater(win) {
-  if (!app.isPackaged) return; // 开发模式跳过
-
-  autoUpdater.autoDownload = false;         // 手动控制下载时机
-  autoUpdater.autoInstallOnAppQuit = true;  // 退出时自动安装
-
-  const send = (status, payload = {}) =>
-    win.webContents.send("updater-status", { status, ...payload });
-
-  autoUpdater.on("checking-for-update", () => send("checking"));
-
-  autoUpdater.on("update-available", (info) => {
-    send("available", { version: info.version });
-    autoUpdater.downloadUpdate(); // 确认有更新后自动开始下载
-  });
-
-  autoUpdater.on("update-not-available", () => send("not-available"));
-
-  autoUpdater.on("download-progress", ({ percent }) =>
-    send("downloading", { percent: Math.floor(percent) })
-  );
-
-  autoUpdater.on("update-downloaded", () => send("downloaded"));
-
-  autoUpdater.on("error", (err) => {
-    console.error("[updater] error:", err.message);
-    send("error", { message: err.message });
-  });
-
-  // IPC: 渲染层手动触发检查
-  ipcMain.handle("check-for-updates", () => {
-    autoUpdater.checkForUpdates();
-  });
-
-  // IPC: 渲染层触发立即安装
-  ipcMain.handle("install-update", () => {
-    autoUpdater.quitAndInstall();
-  });
-
+  _updaterWin = win; // 绑定窗口，此后 sendUpdaterStatus 才能推送消息到渲染层
+  if (!app.isPackaged) return;
   // 启动后 5 秒静默检查，之后每 6 小时检查一次
   setTimeout(() => autoUpdater.checkForUpdates(), 5000);
   setInterval(() => autoUpdater.checkForUpdates(), 6 * 60 * 60 * 1000);

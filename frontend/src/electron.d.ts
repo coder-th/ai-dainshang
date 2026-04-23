@@ -13,6 +13,7 @@ interface ElectronAPI {
   isMaximized(): Promise<boolean>
   onMaximizeChange(cb: (val: boolean) => void): void
   selectDirectory(): Promise<string | undefined>
+  getVersion(): Promise<string>
   checkForUpdates(): Promise<void>
   installUpdate(): Promise<void>
   onUpdateStatus(cb: (payload: UpdaterStatus) => void): void

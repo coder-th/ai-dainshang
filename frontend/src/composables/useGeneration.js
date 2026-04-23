@@ -152,6 +152,7 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, cur
         aspect_ratio: params.aspectRatio,
         image_size: params.resolution,
         search: params.webAccess === 'true',
+        n_images: params.nImages || 1,
         base_images: [baseB64],
         ref_images: refB64s,
       })
@@ -194,11 +195,12 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, cur
     const isTextToImage = baseImages.value.length === 0
 
     if (isTextToImage) {
+      // 先占位一个 loading 任务，等结果回来后按实际张数展开
       generationTasks.value = [{
         id: `${Date.now()}-0`,
         index: 0,
         baseImage: null,
-        status: 'pending',
+        status: 'loading',
         progress: 0,
         resultUrl: null,
         doneAt: null,
@@ -208,9 +210,8 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, cur
         _intervalId: null,
         _blob: null,
       }]
-      const task = generationTasks.value[0]
-      task.status = 'loading'
-      _startFakeProgress(task)
+      const placeholderTask = generationTasks.value[0]
+      _startFakeProgress(placeholderTask)
       const t0 = Date.now()
       try {
         const resp = await generateApi.generate({
@@ -221,29 +222,54 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, cur
           aspect_ratio: params.aspectRatio,
           image_size: params.resolution,
           search: params.webAccess === 'true',
+          n_images: params.nImages || 1,
           base_images: [],
           ref_images: refB64s,
         })
-        const result = resp.data.results?.[0]
-        if (result?.error) throw new Error(result.error)
-        _stopFakeProgress(task, true)
-        task.resultUrl = result.url
-        task.doneAt = `${((Date.now() - t0) / 1000).toFixed(1)}s`
-        try {
-          const proxyResp = await fetch(_buildProxyUrl(result.url))
-          const cl = proxyResp.headers.get('content-length')
-          task._blob = await proxyResp.blob()
-          task.fileSize = _formatBytes(cl ? parseInt(cl) : task._blob.size)
-        } catch { task.fileSize = null }
-        task.status = 'done'
-        ElMessage.success('图片生成完成')
+        clearInterval(placeholderTask._intervalId)
+        placeholderTask._intervalId = null
+
+        const apiResults = resp.data.results || []
+        const elapsed = `${((Date.now() - t0) / 1000).toFixed(1)}s`
+
+        // 按实际返回数量展开任务列表
+        const expandedTasks = apiResults.map((result, i) => ({
+          id: `${Date.now()}-${i}`,
+          index: i,
+          baseImage: null,
+          status: result.error ? 'error' : 'done',
+          progress: result.error ? placeholderTask.progress : 100,
+          resultUrl: result.url || null,
+          doneAt: result.error ? null : elapsed,
+          fileSize: null,
+          selected: true,
+          error: result.error || null,
+          _intervalId: null,
+          _blob: null,
+        }))
+        generationTasks.value = expandedTasks.length ? expandedTasks : [{ ...placeholderTask, status: 'error', error: '返回结果为空' }]
+
+        // 并发拉取 blob（用于下载/保存，不阻塞渲染）
+        expandedTasks.forEach(task => {
+          if (task.resultUrl && !task.resultUrl.startsWith('data:')) {
+            fetch(_buildProxyUrl(task.resultUrl)).then(async r => {
+              const cl = r.headers.get('content-length')
+              task._blob = await r.blob()
+              task.fileSize = _formatBytes(cl ? parseInt(cl) : task._blob.size)
+            }).catch(() => {})
+          }
+        })
+
+        const doneCount = expandedTasks.filter(t => t.status === 'done').length
+        if (doneCount > 0) ElMessage.success(`${doneCount} 张图片生成完成`)
+        else ElMessage.error(expandedTasks[0]?.error || '生成失败')
       } catch (e) {
-        _stopFakeProgress(task, false)
-        task.error = e.response?.data?.error || e.message || '生成失败'
-        task.status = 'error'
+        _stopFakeProgress(placeholderTask, false)
+        placeholderTask.error = e.response?.data?.error || e.message || '生成失败'
+        placeholderTask.status = 'error'
       }
       isGenerating.value = false
-      _saveHistory([task], Date.now() - t0)  // fire-and-forget
+      _saveHistory(generationTasks.value, Date.now() - t0)
       return
     }
 
@@ -301,11 +327,21 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, cur
 
   async function downloadResult(task) {
     try {
-      const blob = task._blob ?? await (await fetch(_buildProxyUrl(task.resultUrl))).blob()
+      let blob
+      if (task._blob) {
+        blob = task._blob
+      } else if (task.resultUrl?.startsWith('data:')) {
+        const res = await fetch(task.resultUrl)
+        blob = await res.blob()
+      } else {
+        blob = await (await fetch(_buildProxyUrl(task.resultUrl))).blob()
+      }
       const blobUrl = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = blobUrl
-      a.download = task.resultUrl.split('/').pop()?.split('?')[0] || `result-${task.index + 1}.jpg`
+      a.download = task.resultUrl?.startsWith('data:')
+        ? `result-${task.index + 1}.png`
+        : (task.resultUrl.split('/').pop()?.split('?')[0] || `result-${task.index + 1}.jpg`)
       a.click()
       URL.revokeObjectURL(blobUrl)
     } catch {
@@ -334,8 +370,15 @@ export function useGeneration({ baseImages, referenceImages, currentModelId, cur
         let successCount = 0
         for (const task of selected) {
           try {
-            const blob = task._blob ?? await (await fetch(_buildProxyUrl(task.resultUrl))).blob()
-            const ext = _extFromUrl(task.resultUrl)
+            let blob
+            if (task._blob) {
+              blob = task._blob
+            } else if (task.resultUrl?.startsWith('data:')) {
+              blob = await (await fetch(task.resultUrl)).blob()
+            } else {
+              blob = await (await fetch(_buildProxyUrl(task.resultUrl))).blob()
+            }
+            const ext = task.resultUrl?.startsWith('data:') ? '.png' : _extFromUrl(task.resultUrl)
             const fileName = `result-${task.index + 1}${ext}`
             const fileHandle = await subHandle.getFileHandle(fileName, { create: true })
             const writable = await fileHandle.createWritable()

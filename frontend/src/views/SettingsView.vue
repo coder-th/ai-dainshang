@@ -136,7 +136,12 @@ async function reset() {
 
 const isElectron = !!window.electronAPI?.checkForUpdates
 
-const appVersion = computed(() => window.__APP_VERSION__ || '未知')
+const appVersion = ref('获取中...')
+
+// 从主进程获取真实版本号
+if (isElectron) {
+  window.electronAPI?.getVersion().then(v => { appVersion.value = v })
+}
 
 const updateStatus = reactive({
   status: 'idle',   // idle | checking | available | not-available | downloading | downloaded | error
@@ -173,6 +178,13 @@ async function checkUpdate() {
   }
   updateStatus.status = 'checking'
   await window.electronAPI.checkForUpdates()
+
+  // 开发模式下主进程不会回调，3 秒后兜底提示
+  setTimeout(() => {
+    if (updateStatus.status === 'checking') {
+      updateStatus.status = 'not-available'
+    }
+  }, 3000)
 }
 
 async function installUpdate() {

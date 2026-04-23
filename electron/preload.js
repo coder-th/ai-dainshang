@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   selectDirectory:  ()    => ipcRenderer.invoke("select-directory"),
   // Page
   reload:           ()    => ipcRenderer.send("win-reload"),
+  // App info
+  getVersion:       ()    => ipcRenderer.invoke("get-version"),
   // Updater
   checkForUpdates:  ()    => ipcRenderer.invoke("check-for-updates"),
   installUpdate:    ()    => ipcRenderer.invoke("install-update"),

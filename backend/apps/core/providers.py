@@ -260,6 +260,88 @@ class YunwuImageProvider(BaseImageProvider):
         raise KeyError("云雾AI 响应中未找到图片数据")
 
 
+class YunwuGptImageProvider(BaseImageProvider):
+    """
+    云雾AI GPT 图像生成 Provider
+    端点：POST https://yunwu.ai/v1/images/generations
+    认证：Header Authorization: Bearer <api_key>
+    支持文生图和图像编辑（最多 5 张参考图）
+    """
+
+    provider_id = "yunwu_gpt"
+
+    supported_models = [
+        "gpt-image-2-all",
+        "gpt-image-2",
+        "gpt-image-1",
+    ]
+
+    # GPT 图像支持的 size 规格映射：前端分辨率标识 → API size 字符串
+    _SIZE_MAP = {
+        "1K": "1024x1024",
+        "2K": "1024x1024",  # GPT 图像不支持 2K，降级为 1024x1024
+        "4K": "1024x1024",  # 同上
+        "512": "1024x1024",
+    }
+
+    # 比例 → size 映射（GPT 图像通过 size 指定横竖版）
+    _RATIO_TO_SIZE = {
+        "16:9": "1536x1024",  # 横版
+        "3:2":  "1536x1024",
+        "4:3":  "1536x1024",
+        "9:16": "1024x1536",  # 竖版
+        "2:3":  "1024x1536",
+        "3:4":  "1024x1536",
+        "1:1":  "1024x1024",
+        "auto": "1024x1024",
+    }
+
+    @property
+    def api_url(self) -> str:
+        return "https://yunwu.ai/v1/images/generations"
+
+    def build_payload(
+        self, model, prompt, image_size, search,
+        aspect_ratio, base_images, ref_images, n: int = 1,
+    ) -> dict:
+        # 根据比例选择 size；比例未指定时用 image_size 映射
+        if aspect_ratio and aspect_ratio != "auto":
+            size = self._RATIO_TO_SIZE.get(aspect_ratio, "1024x1024")
+        else:
+            size = self._SIZE_MAP.get(image_size, "1024x1024")
+
+        _ = search  # GPT 图像 API 不支持联网检索，保留参数仅为统一签名
+
+        payload: dict = {
+            "model": model,
+            "prompt": prompt,
+            "size": size,
+            "n": max(1, min(int(n or 1), 10)),
+        }
+
+        # 图像编辑模式：传入参考图（最多 5 张），base64 data URI 格式
+        images = [*base_images, *ref_images]
+        if images:
+            payload["image"] = images[:5]  # API 上限 5 张
+
+        return payload
+
+    def parse_response(self, data: dict) -> list[str]:
+        """返回所有生成图片的 URL 列表（兼容 n>1 的多图输出）"""
+        items = data.get("data", [])
+        if not items:
+            raise KeyError("GPT 图像响应中缺少 data 字段")
+        urls = []
+        for item in items:
+            if item.get("url"):
+                urls.append(item["url"])
+            elif item.get("b64_json"):
+                urls.append(f"data:image/png;base64,{item['b64_json']}")
+        if not urls:
+            raise KeyError("GPT 图像响应中未找到 url 或 b64_json 字段")
+        return urls
+
+
 # ─── 视频生成 Provider ────────────────────────────────────────────────────────
 
 class BaseVideoProvider(ABC):
@@ -557,6 +639,7 @@ class LingyVideoProvider(BaseVideoProvider):
 _IMAGE_PROVIDERS: list[BaseImageProvider] = [
     LingyaImageProvider(),
     YunwuImageProvider(),
+    YunwuGptImageProvider(),
     # 新增其他 Provider 实例追加于此
 ]
 
