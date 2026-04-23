@@ -3,7 +3,7 @@ const { spawn } = require("child_process");
 const path = require("path");
 const http = require("http");
 const fs = require("fs");
-const { autoUpdater } = require("electron-updater");
+const https = require("https");
 
 const PORT = 9527;
 const BACKEND_URL = `http://127.0.0.1:${PORT}`;
@@ -179,9 +179,15 @@ function waitFor(url, onReady, retries = 80) {
   req.setTimeout(1000, () => req.destroy());
 }
 
-// ─── Auto-updater ─────────────────────────────────────────────────────────────
+// ─── Auto-updater (GitHub Releases API) ───────────────────────────────────────
 
-let _updaterWin = null; // 延迟绑定窗口引用
+const GITHUB_OWNER = "coder-th";
+const GITHUB_REPO  = "ai-dainshang";
+const GITHUB_TAGS_API    = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/tags`;
+const GITHUB_RELEASE_API = (tag) => `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/tags/${tag}`;
+
+let _updaterWin = null;
+let _downloadedInstallerPath = null;
 
 const sendUpdaterStatus = (status, payload = {}) => {
   if (_updaterWin && !_updaterWin.isDestroyed()) {
@@ -189,44 +195,138 @@ const sendUpdaterStatus = (status, payload = {}) => {
   }
 };
 
-// 事件监听在模块加载时就注册，不依赖 setupAutoUpdater 是否已执行
-autoUpdater.autoDownload = false;
-autoUpdater.autoInstallOnAppQuit = true;
+function compareVersions(a, b) {
+  const pa = a.replace(/^v/, "").split(".").map(Number);
+  const pb = b.replace(/^v/, "").split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) > (pb[i] || 0)) return 1;
+    if ((pa[i] || 0) < (pb[i] || 0)) return -1;
+  }
+  return 0;
+}
 
-autoUpdater.on("checking-for-update",   () => sendUpdaterStatus("checking"));
-autoUpdater.on("update-not-available",  () => sendUpdaterStatus("not-available"));
-autoUpdater.on("update-downloaded",     () => sendUpdaterStatus("downloaded"));
-autoUpdater.on("update-available", (info) => {
-  sendUpdaterStatus("available", { version: info.version });
-  autoUpdater.downloadUpdate();
-});
-autoUpdater.on("download-progress", ({ percent }) =>
-  sendUpdaterStatus("downloading", { percent: Math.floor(percent) })
-);
-autoUpdater.on("error", (err) => {
-  console.error("[updater] error:", err.message);
-  const isNoRelease = /Unable to find latest version|releases feed/i.test(err.message);
-  sendUpdaterStatus(isNoRelease ? "not-available" : "error", { message: err.message });
-});
+// 支持重定向的 HTTPS GET，返回 { statusCode, headers, body }
+function httpsGet(url) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: { "User-Agent": `${GITHUB_REPO}/${app.getVersion()}` } }, (res) => {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        return httpsGet(res.headers.location).then(resolve).catch(reject);
+      }
+      let body = "";
+      res.on("data", (c) => (body += c));
+      res.on("end", () => resolve({ statusCode: res.statusCode, headers: res.headers, body }));
+    });
+    req.on("error", reject);
+    req.setTimeout(10000, () => { req.destroy(); reject(new Error("Request timeout")); });
+  });
+}
 
-// IPC handlers — 模块加载时注册，任何时候都可响应
-ipcMain.removeHandler("check-for-updates"); // 防止热重载时重复注册
+// 带进度回调、支持重定向的文件下载
+function downloadFile(url, destPath, onProgress) {
+  return new Promise((resolve, reject) => {
+    const doGet = (downloadUrl) => {
+      const file = fs.createWriteStream(destPath);
+      const req = https.get(downloadUrl, { headers: { "User-Agent": `${GITHUB_REPO}/${app.getVersion()}` } }, (res) => {
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          file.close();
+          fs.unlink(destPath, () => {});
+          return doGet(res.headers.location);
+        }
+        const total = parseInt(res.headers["content-length"] || "0", 10);
+        let received = 0;
+        res.on("data", (chunk) => {
+          received += chunk.length;
+          if (total > 0) onProgress(Math.floor((received / total) * 100));
+        });
+        res.pipe(file);
+        file.on("finish", () => file.close(() => resolve(destPath)));
+        res.on("error", (err) => { file.close(); fs.unlink(destPath, () => {}); reject(err); });
+      });
+      req.on("error", (err) => { file.close(); fs.unlink(destPath, () => {}); reject(err); });
+    };
+    doGet(url);
+  });
+}
+
+async function checkForUpdates() {
+  sendUpdaterStatus("checking");
+
+  // 第一步：查最新 tag
+  const tagsRes = await httpsGet(GITHUB_TAGS_API);
+  if (tagsRes.statusCode !== 200) throw new Error(`GitHub Tags API 返回 ${tagsRes.statusCode}`);
+  const tags = JSON.parse(tagsRes.body);
+  if (!tags.length) { sendUpdaterStatus("not-available"); return; }
+
+  const latestTag     = tags[0].name;
+  const latestVersion = latestTag.replace(/^v/, "");
+  const currentVersion = app.getVersion();
+
+  if (compareVersions(latestVersion, currentVersion) <= 0) {
+    sendUpdaterStatus("not-available");
+    return;
+  }
+
+  // 第二步：用 tag 名查对应 release，获取 asset 下载链接
+  const releaseRes = await httpsGet(GITHUB_RELEASE_API(latestTag));
+  if (releaseRes.statusCode !== 200) throw new Error(`GitHub Release API 返回 ${releaseRes.statusCode}`);
+  const release = JSON.parse(releaseRes.body);
+
+  const asset = release.assets.find((a) => /\.(exe|msi)$/i.test(a.name) && !/debug/i.test(a.name));
+  if (!asset) {
+    sendUpdaterStatus("error", { message: "Release 中未找到 Windows 安装包" });
+    return;
+  }
+
+  sendUpdaterStatus("available", {
+    version:      latestVersion,
+    releaseNotes: release.body || "",
+    downloadUrl:  asset.browser_download_url,
+    assetName:    asset.name,
+  });
+}
+
+async function downloadUpdate(downloadUrl, assetName) {
+  _downloadedInstallerPath = null;
+  const destPath = path.join(app.getPath("temp"), assetName);
+  await downloadFile(downloadUrl, destPath, (percent) => {
+    sendUpdaterStatus("downloading", { percent });
+  });
+  _downloadedInstallerPath = destPath;
+  sendUpdaterStatus("downloaded");
+}
+
+// IPC handlers
+ipcMain.removeHandler("check-for-updates");
 ipcMain.handle("check-for-updates", async () => {
   if (!app.isPackaged) return;
-  try { await autoUpdater.checkForUpdates(); } catch (e) { /* 已由 error 事件处理 */ }
+  try { await checkForUpdates(); } catch (err) {
+    console.error("[updater] check error:", err.message);
+    sendUpdaterStatus("error", { message: err.message });
+  }
+});
+
+ipcMain.removeHandler("download-update");
+ipcMain.handle("download-update", async (_, { downloadUrl, assetName }) => {
+  try { await downloadUpdate(downloadUrl, assetName); } catch (err) {
+    console.error("[updater] download error:", err.message);
+    sendUpdaterStatus("error", { message: err.message });
+  }
 });
 
 ipcMain.removeHandler("install-update");
 ipcMain.handle("install-update", () => {
-  if (app.isPackaged) autoUpdater.quitAndInstall();
+  if (_downloadedInstallerPath && fs.existsSync(_downloadedInstallerPath)) {
+    shell.openPath(_downloadedInstallerPath);
+    setTimeout(() => { isQuitting = true; app.exit(0); }, 800);
+  }
 });
 
 function setupAutoUpdater(win) {
-  _updaterWin = win; // 绑定窗口，此后 sendUpdaterStatus 才能推送消息到渲染层
+  _updaterWin = win;
   if (!app.isPackaged) return;
   // 启动后 5 秒静默检查，之后每 6 小时检查一次
-  setTimeout(() => autoUpdater.checkForUpdates(), 5000);
-  setInterval(() => autoUpdater.checkForUpdates(), 6 * 60 * 60 * 1000);
+  setTimeout(() => checkForUpdates().catch(() => {}), 5000);
+  setInterval(() => checkForUpdates().catch(() => {}), 6 * 60 * 60 * 1000);
 }
 
 

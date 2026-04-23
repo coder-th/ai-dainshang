@@ -1,6 +1,6 @@
 {
   "name": "ai-dianshang",
-  "version": "2.0.7",
+  "version": "2.0.8",
   "description": "AI E-Commerce Management System",
   "main": "electron/main.js",
   "scripts": {
