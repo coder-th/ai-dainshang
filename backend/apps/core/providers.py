@@ -271,7 +271,6 @@ class YunwuGptImageProvider(BaseImageProvider):
     provider_id = "yunwu_gpt"
 
     supported_models = [
-        "gpt-image-2-all",
         "gpt-image-2",
         "gpt-image-1",
     ]
@@ -298,7 +297,7 @@ class YunwuGptImageProvider(BaseImageProvider):
 
     @property
     def api_url(self) -> str:
-        return "https://yunwu.ai/v1/images/generations"
+        return "https://yunwu.ai/v1/images/edits"
 
     def build_payload(
         self, model, prompt, image_size, search,
@@ -325,6 +324,55 @@ class YunwuGptImageProvider(BaseImageProvider):
             payload["image"] = images[:5]  # API 上限 5 张
 
         return payload
+
+    def get_request_kwargs(self, api_key: str, payload: dict, model: str = "") -> dict:  # noqa: ARG002
+        """
+        按有无参考图分流：
+        - 文生图（无 image）：POST /v1/images/generations，JSON body
+        - 图像编辑（有 image）：POST /v1/images/edits，multipart/form-data
+          （edits 端点强制要求 multipart，图片作为文件字段 image[] 上传）
+        """
+        import base64
+
+        body = dict(payload)
+        images = body.pop("image", None) or []
+
+        # 无参考图 → 文生图端点，JSON 请求
+        if not images:
+            return {
+                "url": "https://yunwu.ai/v1/images/generations",
+                "json": body,
+                "headers": {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+            }
+
+        # 有参考图 → 编辑端点，multipart/form-data
+        # 文本字段用 (None, value) 元组；不设 Content-Type，由 requests 自动附加 boundary
+        multipart: list = []
+        for k, v in body.items():
+            if v is not None:
+                multipart.append((k, (None, str(v))))
+
+        # 图片字段名 image[]（OpenAI 多图编辑规范）
+        for img in images:
+            if not img:
+                continue
+            if ";base64," in img:
+                mime = _guess_mime(img)
+                b64_data = img.split(";base64,", 1)[1]
+                img_bytes = base64.b64decode(b64_data)
+                ext = mime.split("/")[-1]
+                multipart.append(("image[]", (f"image.{ext}", img_bytes, mime)))
+            elif img.startswith("http://") or img.startswith("https://"):
+                multipart.append(("image[]", (None, img)))
+
+        return {
+            "url": "https://yunwu.ai/v1/images/edits",
+            "files": multipart,
+            "headers": {"Authorization": f"Bearer {api_key}"},
+        }
 
     def parse_response(self, data: dict) -> list[str]:
         """返回所有生成图片的 URL 列表（兼容 n>1 的多图输出）"""

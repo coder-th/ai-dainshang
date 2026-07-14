@@ -53,7 +53,7 @@ export const SIZE_OPTIONS = [
 /** @type {ImageModelConfig[]} */
 export const IMAGE_MODELS = [
   // ── 灵芽AI 模型 ──────────────────────────────────────────────────────────────
-  {
+  /* {
     id: 'nano-banana-2',
     name: 'Nano-banana 2 (通用)',
     provider: 'lingy',
@@ -195,7 +195,7 @@ export const IMAGE_MODELS = [
     supportsSearch: false,
     defaultRatio: 'auto',
     defaultSize: '1K',
-  },
+  }, */
 
   // ── 云雾AI 模型 ──────────────────────────────────────────────────────────────
   {
@@ -251,20 +251,6 @@ export const IMAGE_MODELS = [
     defaultSize: '1K',
   },
   // ── 云雾AI GPT 图像模型 ──────────────────────────────────────────────────────
-  {
-    id: 'gpt-image-2-all',
-    name: 'GPT Image 2 (生图/修图)',
-    provider: 'yunwu_gpt',
-    tag: '推荐',
-    disabled: false,
-    desc: 'GPT Image 2 是 OpenAI 最先进的图像生成模型，支持快速高质量文生图与图像编辑。支持横版（1536×1024）、竖版（1024×1536）和正方形（1024×1024）输出。上传参考图即可进入编辑模式（最多 5 张）。支持一次生成多张（最多 10 张）。',
-    supportedRatios: ['auto', '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'],
-    supportedSizes: ['1K'],
-    supportsSearch: false,
-    supportsMultiOutput: true,
-    defaultRatio: '1:1',
-    defaultSize: '1K',
-  },
   {
     id: 'gpt-image-2',
     name: 'GPT Image 2',
@@ -325,7 +311,7 @@ export const VIDEO_DURATION_OPTIONS = [
 /** @type {VideoModelConfig[]} */
 export const VIDEO_MODELS = [
   // ── 灵芽AI Veo 3.1 系列 ──────────────────────────────────────────────────────
-  {
+  /* {
     id: 'veo_3_1-fast',
     name: 'Veo 3.1 Fast（灵芽）',
     series: '灵芽 Veo 3.1',
@@ -360,7 +346,7 @@ export const VIDEO_MODELS = [
     provider: 'lingy_video',
     desc: '灵芽AI Veo 3.1 专业 4K 版本，质量最高，支持首尾帧参考图，固定生成 8 秒视频',
     disabled: false,
-  },
+  }, */
 
   // ── 云雾AI Veo 3.1 系列（最新，推荐）──────────────────────────────────────────
   {

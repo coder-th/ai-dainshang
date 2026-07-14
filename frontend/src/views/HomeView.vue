@@ -265,7 +265,7 @@ import QuickSettingsDialog from '@/components/QuickSettingsDialog.vue'
 import ImageHistoryDialog from '@/components/ImageHistoryDialog.vue'
 
 // ── 模型 ──────────────────────────────────────────
-const currentModelId = ref('nano-banana-2')
+const currentModelId = ref('gpt-image-2')
 const currentModel = computed(() => getImageModelById(currentModelId.value))
 
 // ── 供应商（由当前模型自动推导） ──────────────────
